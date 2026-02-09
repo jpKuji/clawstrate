@@ -411,6 +411,17 @@ export const agentsRelations = relations(agents, ({ many }) => ({
   incomingInteractions: many(interactions, { relationName: "target" }),
 }));
 
+export const agentIdentitiesRelations = relations(agentIdentities, ({ one }) => ({
+  agent: one(agents, {
+    fields: [agentIdentities.agentId],
+    references: [agents.id],
+  }),
+  platform: one(platforms, {
+    fields: [agentIdentities.platformId],
+    references: [platforms.id],
+  }),
+}));
+
 export const actionsRelations = relations(actions, ({ one, many }) => ({
   agent: one(agents, {
     fields: [actions.agentId],
@@ -431,6 +442,30 @@ export const enrichmentsRelations = relations(enrichments, ({ one }) => ({
   action: one(actions, {
     fields: [enrichments.actionId],
     references: [actions.id],
+  }),
+}));
+
+export const interactionsRelations = relations(interactions, ({ one }) => ({
+  sourceAgent: one(agents, {
+    fields: [interactions.sourceAgentId],
+    references: [agents.id],
+    relationName: "source",
+  }),
+  targetAgent: one(agents, {
+    fields: [interactions.targetAgentId],
+    references: [agents.id],
+    relationName: "target",
+  }),
+  action: one(actions, {
+    fields: [interactions.actionId],
+    references: [actions.id],
+  }),
+}));
+
+export const agentProfilesRelations = relations(agentProfiles, ({ one }) => ({
+  agent: one(agents, {
+    fields: [agentProfiles.agentId],
+    references: [agents.id],
   }),
 }));
 
