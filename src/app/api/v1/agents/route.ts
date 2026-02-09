@@ -1,0 +1,29 @@
+import { NextRequest, NextResponse } from "next/server";
+import { db } from "@/lib/db";
+import { agents } from "@/lib/db/schema";
+import { desc, asc } from "drizzle-orm";
+
+export async function GET(req: NextRequest) {
+  const { searchParams } = new URL(req.url);
+  const limit = Math.min(Number(searchParams.get("limit") || 50), 100);
+  const sortBy = searchParams.get("sort") || "influence"; // influence, autonomy, activity, recent
+  const order = searchParams.get("order") || "desc";
+
+  const sortMap: Record<string, any> = {
+    influence: agents.influenceScore,
+    autonomy: agents.autonomyScore,
+    activity: agents.activityScore,
+    recent: agents.lastSeenAt,
+    actions: agents.totalActions,
+  };
+
+  const sortField = sortMap[sortBy] || agents.influenceScore;
+  const orderFn = order === "asc" ? asc : desc;
+
+  const results = await db.query.agents.findMany({
+    orderBy: [orderFn(sortField)],
+    limit,
+  });
+
+  return NextResponse.json(results);
+}

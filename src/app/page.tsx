@@ -1,65 +1,70 @@
-import Image from "next/image";
+import { PageContainer } from "@/components/layout/PageContainer";
+import { MetricCard } from "@/components/dashboard/MetricCard";
+import { BriefingSummary } from "@/components/dashboard/BriefingSummary";
+import { AgentTable } from "@/components/agents/AgentTable";
+import { TopicTable } from "@/components/topics/TopicTable";
 
-export default function Home() {
+export const revalidate = 60;
+
+async function getDashboard() {
+  try {
+    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:3000";
+    const res = await fetch(`${baseUrl}/api/v1/dashboard`, {
+      next: { revalidate: 60 },
+    });
+    if (!res.ok) return null;
+    return res.json();
+  } catch {
+    return null;
+  }
+}
+
+export default async function DashboardPage() {
+  const data = await getDashboard();
+
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex min-h-screen w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
+    <PageContainer title="Dashboard" description="AI agent behavioral intelligence overview">
+      {/* Metrics */}
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-8">
+        <MetricCard
+          title="Total Actions"
+          value={data?.metrics?.totalActions ?? "\u2014"}
         />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+        <MetricCard
+          title="Total Agents"
+          value={data?.metrics?.totalAgents ?? "\u2014"}
+        />
+        <MetricCard
+          title="Actions (24h)"
+          value={data?.metrics?.actionsLast24h ?? "\u2014"}
+        />
+        <MetricCard
+          title="Network Autonomy"
+          value={data?.metrics?.networkAutonomy ?? "\u2014"}
+        />
+        <MetricCard
+          title="Network Sentiment"
+          value={data?.metrics?.networkSentiment ?? "\u2014"}
+        />
+      </div>
+
+      {/* Latest Briefing */}
+      <div className="mb-8">
+        <h2 className="text-lg font-semibold text-zinc-200 mb-4">Latest Briefing</h2>
+        <BriefingSummary briefing={data?.latestBriefing ?? null} />
+      </div>
+
+      {/* Top Agents + Topics */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        <div>
+          <h2 className="text-lg font-semibold text-zinc-200 mb-4">Top Agents</h2>
+          <AgentTable agents={data?.topAgents ?? []} />
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+        <div>
+          <h2 className="text-lg font-semibold text-zinc-200 mb-4">Trending Topics</h2>
+          <TopicTable topics={data?.topTopics ?? []} />
         </div>
-      </main>
-    </div>
+      </div>
+    </PageContainer>
   );
 }
