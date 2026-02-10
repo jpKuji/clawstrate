@@ -1,0 +1,79 @@
+/**
+ * One-time script to register QStash scheduled jobs for the CLAWSTRATE pipeline.
+ *
+ * Usage:
+ *   npx tsx scripts/setup-qstash.ts
+ *
+ * Requires env vars: QSTASH_TOKEN, CRON_SECRET, NEXT_PUBLIC_BASE_URL (production URL)
+ */
+
+import { Client } from "@upstash/qstash";
+
+const QSTASH_TOKEN = process.env.QSTASH_TOKEN;
+const CRON_SECRET = process.env.CRON_SECRET;
+const BASE_URL = process.argv[2] || "https://clawstrate.vercel.app";
+
+if (!QSTASH_TOKEN || !CRON_SECRET) {
+  console.error("Missing QSTASH_TOKEN or CRON_SECRET in environment");
+  process.exit(1);
+}
+
+const client = new Client({ token: QSTASH_TOKEN });
+
+const schedules = [
+  {
+    destination: `${BASE_URL}/api/cron/ingest`,
+    cron: "*/30 * * * *",
+    name: "clawstrate-ingest",
+  },
+  {
+    destination: `${BASE_URL}/api/cron/enrich`,
+    cron: "5,35 * * * *",
+    name: "clawstrate-enrich",
+  },
+  {
+    destination: `${BASE_URL}/api/cron/analyze`,
+    cron: "15 */4 * * *",
+    name: "clawstrate-analyze",
+  },
+  {
+    destination: `${BASE_URL}/api/cron/briefing`,
+    cron: "30 */6 * * *",
+    name: "clawstrate-briefing",
+  },
+];
+
+async function main() {
+  console.log(`Setting up QStash schedules targeting ${BASE_URL}\n`);
+
+  // List existing schedules to avoid duplicates
+  const existing = await client.schedules.list();
+  for (const s of existing) {
+    if (
+      s.destination &&
+      typeof s.destination === "string" &&
+      s.destination.includes("clawstrate")
+    ) {
+      console.log(`Removing existing schedule: ${s.scheduleId} → ${s.destination}`);
+      await client.schedules.delete(s.scheduleId);
+    }
+  }
+
+  for (const s of schedules) {
+    const result = await client.schedules.create({
+      destination: s.destination,
+      cron: s.cron,
+      headers: {
+        Authorization: `Bearer ${CRON_SECRET}`,
+      },
+    });
+    console.log(`Created: ${s.name} (${s.cron}) → ${result.scheduleId}`);
+  }
+
+  console.log("\nAll schedules registered.");
+}
+
+main().catch((e) => {
+  console.error("Failed:", e);
+  process.exit(1);
+});
