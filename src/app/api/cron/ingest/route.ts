@@ -4,7 +4,15 @@ import { acquireLock } from "@/lib/redis";
 
 export const maxDuration = 120; // 2 minutes max
 
+export async function POST(req: NextRequest) {
+  return handler(req);
+}
+
 export async function GET(req: NextRequest) {
+  return handler(req);
+}
+
+async function handler(req: NextRequest) {
   // Verify cron secret
   const authHeader = req.headers.get("authorization");
   if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
