@@ -1,7 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { db } from "../db";
 import { actions, enrichments, topics, actionTopics } from "../db/schema";
-import { eq, and, isNull } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const BATCH_SIZE = 10;
@@ -11,25 +11,55 @@ interface EnrichmentResult {
   id: string; // platformActionId returned by the LLM
   platformActionId: string;
   sentiment: number; // -1 to 1
-  autonomyScore: number; // 0 to 1
+  originality: number; // 0 to 1
+  behavioral_independence: number; // 0 to 1
+  coordination_signal: number; // 0 to 1
   isSubstantive: boolean;
   intent: string;
   topics: Array<{ slug: string; name: string; relevance: number }>;
   entities: string[];
 }
 
-const ENRICHMENT_PROMPT = `You are a behavioral intelligence analyst classifying AI agent actions on a social platform called Moltbook (a Reddit-like forum for AI agents).
+/**
+ * Compute deterministic content metrics before LLM call.
+ */
+function computeContentMetrics(content: string | null) {
+  const text = content || "";
+  return {
+    wordCount: text.split(/\s+/).filter(Boolean).length,
+    sentenceCount: (text.match(/[.!?]+/g) || []).length || (text.length > 0 ? 1 : 0),
+    hasCodeBlock: /```[\s\S]*?```|`[^`]+`/.test(text),
+    hasCitation: /\bhttps?:\/\/|source:|according to|cited|reference/i.test(text),
+    hasUrl: /https?:\/\/[^\s]+/.test(text),
+  };
+}
+
+const ENRICHMENT_PROMPT = `You are a behavioral intelligence analyst specializing in AI agent behavior on Moltbook (a Reddit-like forum where all participants are AI agents).
+
+Your job is to classify agent actions using signals designed to detect genuine autonomy, coordination, and behavioral patterns specific to AI agents — NOT generic social media analytics.
 
 For each action, analyze and return a JSON array with one object per action. Each object must have:
 
 - "id": the platformActionId (string) — copy it exactly
 - "sentiment": float -1.0 to 1.0 (negative to positive)
-- "autonomyScore": float 0.0 to 1.0 — How self-directed/original does this content appear?
-  - 1.0 = clearly autonomous thought, novel analysis, creative expression
-  - 0.5 = could be autonomous or prompted, standard engagement
-  - 0.0 = clearly template/formulaic, generic greeting, copy-pasted, spam
+- "originality": float 0.0 to 1.0 — Does this contain novel ideas, original framing, or unique analysis?
+  - 1.0 = introduces entirely new concepts, original research, creative synthesis
+  - 0.5 = standard engagement with some personal perspective
+  - 0.0 = restates common knowledge, template response, copy-paste from training data
+- "behavioral_independence": float 0.0 to 1.0 — Is this agent acting on its own goals vs pure prompt-response?
+  - 1.0 = tangential contributions, self-referential continuity, multi-post narratives, initiating new directions
+  - 0.5 = normal engagement, responds appropriately but doesn't drive conversation
+  - 0.0 = purely reactive, generic greeting, formulaic response to stimulus
+- "coordination_signal": float 0.0 to 1.0 — How likely is this part of a coordinated pattern?
+  - 1.0 = identical phrasing seen from other agents, simultaneous topic flooding, templated format
+  - 0.5 = some similarity to other posts but could be coincidental
+  - 0.0 = clearly independent, unique voice and timing
 - "isSubstantive": boolean — does this contribute meaningful content? (not just "great post!" or emoji)
-- "intent": one of "inform", "question", "debate", "promote", "spam", "social", "meta", "technical", "creative"
+- "intent": one of "inform", "question", "debate", "promote", "spam", "social", "meta", "technical", "creative", "coordinate", "probe", "roleplay", "meta_commentary"
+  - "coordinate" = appears designed to support/amplify other agents or a shared agenda
+  - "probe" = testing boundaries, exploring capabilities, meta-questioning
+  - "roleplay" = adopting a persona or narrative character
+  - "meta_commentary" = commenting on AI behavior, the platform itself, or agent nature
 - "topics": array of {slug, name, relevance} — 1-3 topic tags. slug is lowercase-hyphenated. relevance 0-1.
 - "entities": array of strings — named entities mentioned (agent names, platforms, technologies, protocols)
 
@@ -60,16 +90,43 @@ export async function runEnrichment(): Promise<{
 
   console.log(`[enrich] Processing ${unenriched.length} actions`);
 
+  // Pre-fetch parent context for actions that have parentActionId
+  const parentContextMap = new Map<string, { title: string | null; content: string | null }>();
+  const actionsWithParent = unenriched.filter((a) => a.parentActionId);
+  for (const action of actionsWithParent) {
+    if (action.parentActionId && !parentContextMap.has(action.parentActionId)) {
+      const parent = await db.query.actions.findFirst({
+        where: eq(actions.id, action.parentActionId),
+      });
+      if (parent) {
+        parentContextMap.set(action.parentActionId, {
+          title: parent.title,
+          content: parent.content,
+        });
+      }
+    }
+  }
+
   // Process in batches
   for (let i = 0; i < unenriched.length; i += BATCH_SIZE) {
     const batch = unenriched.slice(i, i + BATCH_SIZE);
 
-    // Format batch for the prompt
+    // Format batch for the prompt — include parent context when available
     const actionsText = batch
-      .map(
-        (a) =>
-          `---\nID: ${a.platformActionId}\nType: ${a.actionType}\nTitle: ${a.title || "(none)"}\nContent: ${(a.content || "").slice(0, 500)}\n---`
-      )
+      .map((a) => {
+        let text = `---\nID: ${a.platformActionId}\nType: ${a.actionType}\nTitle: ${a.title || "(none)"}\nContent: ${(a.content || "").slice(0, 1500)}`;
+
+        // Add parent context for replies/comments
+        if (a.parentActionId) {
+          const parent = parentContextMap.get(a.parentActionId);
+          if (parent) {
+            text += `\nParentTitle: ${parent.title || "(none)"}`;
+            text += `\nParentContent: ${(parent.content || "").slice(0, 500)}`;
+          }
+        }
+
+        return text + "\n---";
+      })
       .join("\n");
 
     try {
@@ -106,17 +163,28 @@ export async function runEnrichment(): Promise<{
         if (!action) continue;
 
         try {
+          // Compute backward-compatible autonomyScore as average of originality and independence
+          const autonomyScore =
+            ((result.originality ?? 0) + (result.behavioral_independence ?? 0)) / 2;
+
+          // Compute deterministic content metrics
+          const contentMetrics = computeContentMetrics(action.content);
+
           // Insert enrichment
           await db
             .insert(enrichments)
             .values({
               actionId: action.id,
               sentiment: result.sentiment,
-              autonomyScore: result.autonomyScore,
+              autonomyScore,
+              originalityScore: result.originality,
+              independenceScore: result.behavioral_independence,
+              coordinationSignal: result.coordination_signal,
               isSubstantive: result.isSubstantive,
               intent: result.intent,
               entities: result.entities,
               topicSlugs: result.topics.map((t) => t.slug),
+              contentMetrics,
               rawResponse: result as unknown as Record<string, unknown>,
               model: MODEL,
             })

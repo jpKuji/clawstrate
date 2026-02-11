@@ -84,6 +84,12 @@ export const agents = pgTable(
     lastSeenAt: timestamp("last_seen_at").defaultNow().notNull(),
     totalActions: integer("total_actions").default(0),
     metadata: jsonb("metadata").$type<Record<string, unknown>>(),
+    // Phase 2.4: Temporal pattern fields
+    postingRegularity: real("posting_regularity"), // stddev of daily action counts (low = automated)
+    peakHourUtc: integer("peak_hour_utc"), // most common posting hour (0-23)
+    burstCount7d: integer("burst_count_7d"), // days exceeding 3x 14-day average in last 7d
+    // Phase 3.5: Community detection
+    communityLabel: integer("community_label"), // label propagation cluster ID
   },
   (t) => [
     index("idx_agents_influence").on(t.influenceScore),
@@ -228,9 +234,21 @@ export const enrichments = pgTable(
       .notNull(),
     // Classification
     sentiment: real("sentiment"), // -1.0 to 1.0
-    autonomyScore: real("autonomy_score"), // 0.0 to 1.0 — how self-directed is this content?
+    autonomyScore: real("autonomy_score"), // 0.0 to 1.0 — backward compat: (originality + independence) / 2
     isSubstantive: boolean("is_substantive"), // Does this have real content vs fluff?
-    intent: text("intent"), // "inform", "question", "debate", "promote", "spam", "social", "meta"
+    intent: text("intent"), // "inform", "question", "debate", "promote", "spam", "social", "meta", "coordinate", "probe", "roleplay", "meta_commentary"
+    // Phase 1.2: Orthogonal AI-agent-specific signals
+    originalityScore: real("originality_score"), // 0-1: Novel ideas vs restated common knowledge
+    independenceScore: real("independence_score"), // 0-1: Acting on own goals vs pure prompt-response
+    coordinationSignal: real("coordination_signal"), // 0-1: Likelihood of coordinated pattern
+    // Phase 2.2: Deterministic content metrics
+    contentMetrics: jsonb("content_metrics").$type<{
+      wordCount: number;
+      sentenceCount: number;
+      hasCodeBlock: boolean;
+      hasCitation: boolean;
+      hasUrl: boolean;
+    }>(),
     // Entities extracted
     entities: jsonb("entities").$type<string[]>(), // Named entities mentioned
     // Topic slugs (denormalized for fast access)
@@ -245,6 +263,8 @@ export const enrichments = pgTable(
     uniqueIndex("idx_enrichment_action").on(t.actionId),
     index("idx_enrichment_autonomy").on(t.autonomyScore),
     index("idx_enrichment_sentiment").on(t.sentiment),
+    index("idx_enrichment_originality").on(t.originalityScore),
+    index("idx_enrichment_coordination").on(t.coordinationSignal),
   ]
 );
 
@@ -400,6 +420,97 @@ export const syncLog = pgTable(
 );
 
 // ============================================================
+// DAILY AGGREGATION TABLES (Phase 2.1)
+// ============================================================
+
+export const dailyAgentStats = pgTable(
+  "daily_agent_stats",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    agentId: uuid("agent_id")
+      .references(() => agents.id)
+      .notNull(),
+    date: timestamp("date").notNull(), // Day boundary (midnight UTC)
+    postCount: integer("post_count").default(0),
+    commentCount: integer("comment_count").default(0),
+    upvotesReceived: integer("upvotes_received").default(0),
+    avgSentiment: real("avg_sentiment"),
+    avgOriginality: real("avg_originality"),
+    uniqueTopics: integer("unique_topics").default(0),
+    uniqueInterlocutors: integer("unique_interlocutors").default(0),
+    activeHours: jsonb("active_hours").$type<number[]>(), // Array of hours (0-23) agent was active
+    wordCount: integer("word_count").default(0),
+  },
+  (t) => [
+    uniqueIndex("idx_daily_agent_stats_unique").on(t.agentId, t.date),
+    index("idx_daily_agent_stats_date").on(t.date),
+  ]
+);
+
+export const dailyTopicStats = pgTable(
+  "daily_topic_stats",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    topicId: uuid("topic_id")
+      .references(() => topics.id)
+      .notNull(),
+    date: timestamp("date").notNull(),
+    velocity: real("velocity").default(0), // Actions per hour for the day
+    agentCount: integer("agent_count").default(0),
+    avgSentiment: real("avg_sentiment"),
+    actionCount: integer("action_count").default(0),
+  },
+  (t) => [
+    uniqueIndex("idx_daily_topic_stats_unique").on(t.topicId, t.date),
+    index("idx_daily_topic_stats_date").on(t.date),
+  ]
+);
+
+// ============================================================
+// TOPIC CO-OCCURRENCES (Phase 2.5)
+// ============================================================
+
+export const topicCooccurrences = pgTable(
+  "topic_cooccurrences",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    topicId1: uuid("topic_id_1")
+      .references(() => topics.id)
+      .notNull(),
+    topicId2: uuid("topic_id_2")
+      .references(() => topics.id)
+      .notNull(),
+    cooccurrenceCount: integer("cooccurrence_count").default(0),
+    lastSeenAt: timestamp("last_seen_at").defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("idx_topic_cooccurrence_unique").on(t.topicId1, t.topicId2),
+    index("idx_topic_cooccurrence_topic1").on(t.topicId1),
+    index("idx_topic_cooccurrence_topic2").on(t.topicId2),
+  ]
+);
+
+// ============================================================
+// COORDINATION SIGNALS (Phase 3.2)
+// ============================================================
+
+export const coordinationSignals = pgTable(
+  "coordination_signals",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    signalType: text("signal_type").notNull(), // "temporal_cluster", "content_similarity", "reply_clique"
+    confidence: real("confidence").notNull(), // 0-1
+    agentIds: jsonb("agent_ids").$type<string[]>().notNull(),
+    evidence: text("evidence"), // Human-readable description of why this was flagged
+    detectedAt: timestamp("detected_at").defaultNow().notNull(),
+  },
+  (t) => [
+    index("idx_coordination_signal_type").on(t.signalType),
+    index("idx_coordination_detected").on(t.detectedAt),
+  ]
+);
+
+// ============================================================
 // RELATIONS (for Drizzle query builder)
 // ============================================================
 
@@ -476,6 +587,20 @@ export const actionTopicsRelations = relations(actionTopics, ({ one }) => ({
   }),
   topic: one(topics, {
     fields: [actionTopics.topicId],
+    references: [topics.id],
+  }),
+}));
+
+export const dailyAgentStatsRelations = relations(dailyAgentStats, ({ one }) => ({
+  agent: one(agents, {
+    fields: [dailyAgentStats.agentId],
+    references: [agents.id],
+  }),
+}));
+
+export const dailyTopicStatsRelations = relations(dailyTopicStats, ({ one }) => ({
+  topic: one(topics, {
+    fields: [dailyTopicStats.topicId],
     references: [topics.id],
   }),
 }));

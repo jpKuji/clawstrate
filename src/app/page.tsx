@@ -28,23 +28,28 @@ export default async function DashboardPage() {
       <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-8">
         <MetricCard
           title="Total Actions"
-          value={data?.metrics?.totalActions ?? "\u2014"}
+          value={data?.metrics?.totalActions?.current ?? "\u2014"}
+          trend={data?.metrics?.totalActions?.change}
         />
         <MetricCard
           title="Total Agents"
-          value={data?.metrics?.totalAgents ?? "\u2014"}
+          value={data?.metrics?.totalAgents?.current ?? "\u2014"}
+          trend={data?.metrics?.totalAgents?.change}
         />
         <MetricCard
           title="Actions (24h)"
-          value={data?.metrics?.actionsLast24h ?? "\u2014"}
+          value={data?.metrics?.actionsLast24h?.current ?? "\u2014"}
+          trend={data?.metrics?.actionsLast24h?.change}
         />
         <MetricCard
           title="Network Autonomy"
-          value={data?.metrics?.networkAutonomy ?? "\u2014"}
+          value={data?.metrics?.networkAutonomy?.current ?? "\u2014"}
+          trend={data?.metrics?.networkAutonomy?.change}
         />
         <MetricCard
           title="Network Sentiment"
-          value={data?.metrics?.networkSentiment ?? "\u2014"}
+          value={data?.metrics?.networkSentiment?.current ?? "\u2014"}
+          trend={data?.metrics?.networkSentiment?.change}
         />
       </div>
 

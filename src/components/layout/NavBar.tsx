@@ -20,6 +20,9 @@ export function NavBar() {
           <Link href="/topics" className="text-zinc-400 hover:text-zinc-100 transition-colors">
             Topics
           </Link>
+          <Link href="/network" className="text-zinc-400 hover:text-zinc-100 transition-colors">
+            Network
+          </Link>
           <Link href="/methodology" className="text-zinc-400 hover:text-zinc-100 transition-colors">
             Methodology
           </Link>

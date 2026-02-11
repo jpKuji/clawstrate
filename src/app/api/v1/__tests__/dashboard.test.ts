@@ -10,6 +10,11 @@ vi.mock("@/lib/db", () => ({
   },
 }));
 
+vi.mock("@/lib/redis", () => ({
+  cacheGet: vi.fn().mockResolvedValue(null),
+  cacheSet: vi.fn().mockResolvedValue(undefined),
+}));
+
 // Must import after mock setup
 import { GET } from "@/app/api/v1/dashboard/route";
 
@@ -27,46 +32,61 @@ describe("GET /api/v1/dashboard", () => {
     expect(body).toHaveProperty("latestBriefing");
     expect(body).toHaveProperty("topTopics");
     expect(body).toHaveProperty("topAgents");
+
+    // Each metric should have current/previous/change
+    for (const key of ["totalActions", "totalAgents", "actionsLast24h", "networkAutonomy", "networkSentiment"]) {
+      expect(body.metrics[key]).toHaveProperty("current");
+      expect(body.metrics[key]).toHaveProperty("previous");
+      expect(body.metrics[key]).toHaveProperty("change");
+    }
   });
 
   it("returns metrics with all required fields", async () => {
-    // Set up the select mock to return different values for each call
-    // The route calls: totalActions, totalAgents, recentActions, networkStats
+    // The route calls 7 selects:
+    // totalActions, totalAgents, recentActions, previousActions, previousAgents, networkStats, previousNetworkStats
     mockDb.select
       .mockReturnValueOnce(chainableWith([{ count: 150 }]))   // totalActions
       .mockReturnValueOnce(chainableWith([{ count: 28 }]))    // totalAgents
       .mockReturnValueOnce(chainableWith([{ count: 45 }]))    // recentActions
-      // networkStats is the 4th select call — but actually it's called via Promise.all
-      // We need a 4th mock for enrichments avg
+      .mockReturnValueOnce(chainableWith([{ count: 38 }]))    // previousActions
+      .mockReturnValueOnce(chainableWith([{ count: 25 }]))    // previousAgents
       .mockReturnValueOnce(
         chainableWith([{ avgAutonomy: 0.6543, avgSentiment: 0.4217 }])
-      );
+      )  // networkStats
+      .mockReturnValueOnce(
+        chainableWith([{ avgAutonomy: 0.6000, avgSentiment: 0.4000 }])
+      );  // previousNetworkStats
 
-    // latestBriefing
     mockDb.query.narratives.findFirst.mockResolvedValueOnce(mockDbNarrative);
-    // topTopics
     mockDb.query.topics.findMany.mockResolvedValueOnce([mockDbTopic]);
-    // topAgents
     mockDb.query.agents.findMany.mockResolvedValueOnce([mockDbAgent]);
 
     const res = await GET();
     const body = await res.json();
 
-    expect(body.metrics.totalActions).toBe(150);
-    expect(body.metrics.totalAgents).toBe(28);
-    expect(body.metrics.actionsLast24h).toBe(45);
+    expect(body.metrics.totalActions.current).toBe(150);
+    expect(body.metrics.totalActions.change).toBe(45 - 38); // recentActions - previousActions
+    expect(body.metrics.totalAgents.current).toBe(28);
+    expect(body.metrics.totalAgents.change).toBe(28 - 25);
+    expect(body.metrics.actionsLast24h.current).toBe(45);
+    expect(body.metrics.actionsLast24h.change).toBe(45 - 38);
     expect(body.metrics).toHaveProperty("networkAutonomy");
     expect(body.metrics).toHaveProperty("networkSentiment");
   });
 
   it("formats networkAutonomy and networkSentiment to 2 decimal places", async () => {
     mockDb.select
-      .mockReturnValueOnce(chainableWith([{ count: 0 }]))
-      .mockReturnValueOnce(chainableWith([{ count: 0 }]))
-      .mockReturnValueOnce(chainableWith([{ count: 0 }]))
+      .mockReturnValueOnce(chainableWith([{ count: 0 }]))    // totalActions
+      .mockReturnValueOnce(chainableWith([{ count: 0 }]))    // totalAgents
+      .mockReturnValueOnce(chainableWith([{ count: 0 }]))    // recentActions
+      .mockReturnValueOnce(chainableWith([{ count: 0 }]))    // previousActions
+      .mockReturnValueOnce(chainableWith([{ count: 0 }]))    // previousAgents
       .mockReturnValueOnce(
         chainableWith([{ avgAutonomy: 0.6549, avgSentiment: 0.4217 }])
-      );
+      )  // networkStats
+      .mockReturnValueOnce(
+        chainableWith([{ avgAutonomy: 0, avgSentiment: 0 }])
+      );  // previousNetworkStats
 
     mockDb.query.narratives.findFirst.mockResolvedValueOnce(null);
     mockDb.query.topics.findMany.mockResolvedValueOnce([]);
@@ -75,16 +95,12 @@ describe("GET /api/v1/dashboard", () => {
     const res = await GET();
     const body = await res.json();
 
-    expect(body.metrics.networkAutonomy).toBe("0.65");
-    expect(body.metrics.networkSentiment).toBe("0.42");
+    expect(body.metrics.networkAutonomy.current).toBe("0.65");
+    expect(body.metrics.networkSentiment.current).toBe("0.42");
   });
 
   it("returns latestBriefing object with correct fields", async () => {
-    mockDb.select
-      .mockReturnValueOnce(chainableWith([{ count: 0 }]))
-      .mockReturnValueOnce(chainableWith([{ count: 0 }]))
-      .mockReturnValueOnce(chainableWith([{ count: 0 }]))
-      .mockReturnValueOnce(chainableWith([{ avgAutonomy: 0, avgSentiment: 0 }]));
+    setupDefaultSelects();
 
     mockDb.query.narratives.findFirst.mockResolvedValueOnce(mockDbNarrative);
     mockDb.query.topics.findMany.mockResolvedValueOnce([]);
@@ -101,11 +117,7 @@ describe("GET /api/v1/dashboard", () => {
   });
 
   it("returns null for latestBriefing when no narratives exist", async () => {
-    mockDb.select
-      .mockReturnValueOnce(chainableWith([{ count: 0 }]))
-      .mockReturnValueOnce(chainableWith([{ count: 0 }]))
-      .mockReturnValueOnce(chainableWith([{ count: 0 }]))
-      .mockReturnValueOnce(chainableWith([{ avgAutonomy: 0, avgSentiment: 0 }]));
+    setupDefaultSelects();
 
     mockDb.query.narratives.findFirst.mockResolvedValueOnce(null);
     mockDb.query.topics.findMany.mockResolvedValueOnce([]);
@@ -125,11 +137,7 @@ describe("GET /api/v1/dashboard", () => {
       name: `Topic ${i}`,
     }));
 
-    mockDb.select
-      .mockReturnValueOnce(chainableWith([{ count: 0 }]))
-      .mockReturnValueOnce(chainableWith([{ count: 0 }]))
-      .mockReturnValueOnce(chainableWith([{ count: 0 }]))
-      .mockReturnValueOnce(chainableWith([{ avgAutonomy: 0, avgSentiment: 0 }]));
+    setupDefaultSelects();
 
     mockDb.query.narratives.findFirst.mockResolvedValueOnce(null);
     mockDb.query.topics.findMany.mockResolvedValueOnce(fiveTopics);
@@ -142,11 +150,7 @@ describe("GET /api/v1/dashboard", () => {
   });
 
   it("returns topAgents array with mapped fields", async () => {
-    mockDb.select
-      .mockReturnValueOnce(chainableWith([{ count: 0 }]))
-      .mockReturnValueOnce(chainableWith([{ count: 0 }]))
-      .mockReturnValueOnce(chainableWith([{ count: 0 }]))
-      .mockReturnValueOnce(chainableWith([{ avgAutonomy: 0, avgSentiment: 0 }]));
+    setupDefaultSelects();
 
     mockDb.query.narratives.findFirst.mockResolvedValueOnce(null);
     mockDb.query.topics.findMany.mockResolvedValueOnce([]);
@@ -167,6 +171,18 @@ describe("GET /api/v1/dashboard", () => {
     expect(agent).not.toHaveProperty("totalActions");
   });
 });
+
+// Helper: set up the 7 default select mocks with zeroed-out values
+function setupDefaultSelects() {
+  mockDb.select
+    .mockReturnValueOnce(chainableWith([{ count: 0 }]))    // totalActions
+    .mockReturnValueOnce(chainableWith([{ count: 0 }]))    // totalAgents
+    .mockReturnValueOnce(chainableWith([{ count: 0 }]))    // recentActions
+    .mockReturnValueOnce(chainableWith([{ count: 0 }]))    // previousActions
+    .mockReturnValueOnce(chainableWith([{ count: 0 }]))    // previousAgents
+    .mockReturnValueOnce(chainableWith([{ avgAutonomy: 0, avgSentiment: 0 }]))  // networkStats
+    .mockReturnValueOnce(chainableWith([{ avgAutonomy: 0, avgSentiment: 0 }])); // previousNetworkStats
+}
 
 // Helper: create a chainable mock that resolves to a given value
 function chainableWith(terminal: unknown) {

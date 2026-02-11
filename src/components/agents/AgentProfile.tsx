@@ -2,7 +2,10 @@
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
+import {
+  LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer,
+  RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis,
+} from "recharts";
 
 interface ProfileSnapshot {
   influenceScore: number | null;
@@ -29,6 +32,9 @@ export function AgentProfile({
   agent,
   recentActions,
   profileHistory,
+  percentiles,
+  egoGraph,
+  coordinationFlags,
 }: {
   agent: {
     id: string;
@@ -44,7 +50,28 @@ export function AgentProfile({
   };
   recentActions: Action[];
   profileHistory: ProfileSnapshot[];
+  percentiles?: {
+    influence: number;
+    autonomy: number;
+    activity: number;
+  };
+  egoGraph?: {
+    outgoing: Array<{ targetId: string; displayName: string; weight: number; count: number }>;
+    incoming: Array<{ sourceId: string; displayName: string; weight: number; count: number }>;
+  };
+  coordinationFlags?: Array<{
+    signalType: string;
+    confidence: number;
+    evidence: string | null;
+    detectedAt: string;
+  }>;
 }) {
+  const radarData = [
+    { metric: "Influence", value: agent.influenceScore ?? 0 },
+    { metric: "Autonomy", value: agent.autonomyScore ?? 0 },
+    { metric: "Activity", value: agent.activityScore ?? 0 },
+  ];
+
   const chartData = profileHistory
     .slice()
     .reverse()
@@ -76,9 +103,9 @@ export function AgentProfile({
       {/* Score Cards */}
       <div className="grid grid-cols-4 gap-4">
         {[
-          { label: "Influence", value: agent.influenceScore },
-          { label: "Autonomy", value: agent.autonomyScore },
-          { label: "Activity", value: agent.activityScore },
+          { label: "Influence", value: agent.influenceScore, percentile: percentiles?.influence },
+          { label: "Autonomy", value: agent.autonomyScore, percentile: percentiles?.autonomy },
+          { label: "Activity", value: agent.activityScore, percentile: percentiles?.activity },
           { label: "Total Actions", value: agent.totalActions },
         ].map((s) => (
           <Card key={s.label} className="bg-zinc-900 border-zinc-800">
@@ -87,10 +114,122 @@ export function AgentProfile({
               <p className="text-xl font-bold text-zinc-100">
                 {typeof s.value === "number" ? s.value.toFixed(2) : s.value ?? 0}
               </p>
+              {s.percentile != null && (
+                <p className="text-xs text-zinc-500 mt-0.5">P{s.percentile}</p>
+              )}
             </CardContent>
           </Card>
         ))}
       </div>
+
+      {/* Behavioral Fingerprint Radar */}
+      <Card className="bg-zinc-900 border-zinc-800">
+        <CardHeader>
+          <CardTitle className="text-sm text-zinc-400">Behavioral Fingerprint</CardTitle>
+        </CardHeader>
+        <CardContent className="flex justify-center">
+          <ResponsiveContainer width={300} height={250}>
+            <RadarChart data={radarData}>
+              <PolarGrid stroke="#3f3f46" />
+              <PolarAngleAxis dataKey="metric" tick={{ fill: "#a1a1aa", fontSize: 12 }} />
+              <PolarRadiusAxis domain={[0, 1]} tick={{ fill: "#71717a", fontSize: 10 }} />
+              <Radar
+                dataKey="value"
+                stroke="#10b981"
+                fill="#10b981"
+                fillOpacity={0.2}
+              />
+            </RadarChart>
+          </ResponsiveContainer>
+        </CardContent>
+      </Card>
+
+      {/* Ego Graph — Interaction Partners */}
+      {egoGraph && (egoGraph.outgoing.length > 0 || egoGraph.incoming.length > 0) && (
+        <div className="grid grid-cols-2 gap-4">
+          {egoGraph.outgoing.length > 0 && (
+            <Card className="bg-zinc-900 border-zinc-800">
+              <CardHeader>
+                <CardTitle className="text-sm text-zinc-400">Top Outgoing Interactions</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-2">
+                  {egoGraph.outgoing.map((o) => (
+                    <div key={o.targetId} className="flex items-center justify-between text-sm">
+                      <span className="text-zinc-200 truncate">{o.displayName}</span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-zinc-500 text-xs">{o.count} interactions</span>
+                        <Badge variant="outline" className="border-zinc-700 text-zinc-400 text-xs">
+                          w: {o.weight.toFixed(1)}
+                        </Badge>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+          {egoGraph.incoming.length > 0 && (
+            <Card className="bg-zinc-900 border-zinc-800">
+              <CardHeader>
+                <CardTitle className="text-sm text-zinc-400">Top Incoming Interactions</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-2">
+                  {egoGraph.incoming.map((i) => (
+                    <div key={i.sourceId} className="flex items-center justify-between text-sm">
+                      <span className="text-zinc-200 truncate">{i.displayName}</span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-zinc-500 text-xs">{i.count} interactions</span>
+                        <Badge variant="outline" className="border-zinc-700 text-zinc-400 text-xs">
+                          w: {i.weight.toFixed(1)}
+                        </Badge>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+        </div>
+      )}
+
+      {/* Coordination Flags */}
+      {coordinationFlags && coordinationFlags.length > 0 && (
+        <Card className="bg-zinc-900 border-zinc-800">
+          <CardHeader>
+            <CardTitle className="text-sm text-zinc-400">Coordination Signals</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-3">
+              {coordinationFlags.map((flag, idx) => (
+                <div key={idx} className="flex items-start gap-3 border-b border-zinc-800 pb-3 last:border-0">
+                  <Badge
+                    variant="outline"
+                    className={
+                      flag.confidence > 0.7
+                        ? "border-red-700 text-red-400 text-xs"
+                        : flag.confidence > 0.4
+                          ? "border-yellow-700 text-yellow-400 text-xs"
+                          : "border-zinc-700 text-zinc-400 text-xs"
+                    }
+                  >
+                    {flag.signalType}
+                  </Badge>
+                  <div className="flex-1">
+                    {flag.evidence && (
+                      <p className="text-xs text-zinc-400">{flag.evidence}</p>
+                    )}
+                    <p className="text-xs text-zinc-600 mt-0.5">
+                      Confidence: {(flag.confidence * 100).toFixed(0)}% | {new Date(flag.detectedAt).toLocaleString()}
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Score History Chart */}
       {chartData.length > 1 && (

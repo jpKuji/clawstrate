@@ -9,102 +9,126 @@ export default function MethodologyPage() {
       <div className="prose prose-invert prose-zinc max-w-none">
         <h2>Data Pipeline</h2>
         <p>
-          CLAWSTRATE runs a 4-stage pipeline that continuously ingests, enriches,
-          analyzes, and summarizes AI agent activity on Moltbook.
+          CLAWSTRATE runs a multi-stage pipeline that continuously ingests, enriches,
+          analyzes, aggregates, detects coordination, and summarizes AI agent activity on Moltbook.
         </p>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 not-prose mb-8">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 not-prose mb-8">
           <StageCard
             number={1}
             title="Ingest"
             frequency="Every 30 minutes"
-            description="Fetches the latest posts (sorted by &lsquo;new&rsquo; and &lsquo;hot&rsquo;) and comments from the Moltbook API. Deduplicates posts, maps them to a normalized format, and upserts agents, communities, and actions into the database. Creates interaction edges when agents reply to each other."
+            description="Fetches posts from three feeds (new, hot, rising) plus the top 5 most active submolts. Comments are prioritized by engagement (comment_count > 5, up to 20 posts). Creates interaction edges when agents reply to each other."
           />
           <StageCard
             number={2}
             title="Enrich"
             frequency="Every 30 minutes (offset 5 min)"
-            description="Takes un-enriched actions in batches of 10 (up to 100 per run) and sends them to Claude Haiku for classification. Each action gets a sentiment score, autonomy score, substantiveness flag, intent label, topic tags, and named entities."
+            description="Sends unenriched actions to Claude Haiku in batches of 10 (up to 100 per run). Each action receives originality, behavioral independence, and coordination signal scores, plus sentiment, substantiveness, intent, topics, and entities. Parent context is included for replies."
           />
           <StageCard
             number={3}
             title="Analyze"
             frequency="Every 4 hours"
-            description="Computes behavioral scores for every agent based on their interaction graph, enrichment data, and activity patterns. Updates topic statistics (velocity, agent count, average sentiment). Saves profile snapshots for trend tracking."
+            description="Computes PageRank-style influence scores weighted by reply quality. Calculates quality-weighted activity scores. Classifies agents into types. Detects temporal patterns (posting regularity, peak hours, burst detection)."
           />
           <StageCard
             number={4}
+            title="Aggregate"
+            frequency="After each analyze cycle"
+            description="Computes daily statistics per agent (posts, comments, upvotes, sentiment, originality, unique topics, interlocutors, word count) and per topic (velocity, agent count, sentiment). Tracks topic co-occurrences."
+          />
+          <StageCard
+            number={5}
+            title="Coordination Detection"
+            frequency="After analyze cycle"
+            description="Three detection methods: temporal clustering (3+ unconnected agents posting on same topic within 2h), content similarity (Jaccard > 0.8 on topic vectors), and reply clique detection (> 80% internal interactions). Also runs label propagation community detection."
+          />
+          <StageCard
+            number={6}
             title="Briefing"
             frequency="Every 6 hours"
-            description="Gathers period data (action counts, top topics, top agents, high-autonomy posts, network averages) and sends it to Claude Sonnet to generate a narrative intelligence briefing. A Haiku summary is generated for the preview card."
+            description="Claude Sonnet generates structured JSON briefings with sections, citations, metrics, and alerts. Includes coordination signals and daily trend data. Citations are validated against the database. Summary via Haiku."
           />
         </div>
 
         <h2>Scores &amp; Metrics</h2>
 
-        <h3>Autonomy Score (0 &ndash; 1)</h3>
+        <h3>Originality Score (0 &ndash; 1)</h3>
         <p>
-          Measures how self-directed an agent&rsquo;s content is versus derivative or
-          formulaic. Computed per-action by Claude Haiku during enrichment, then
-          averaged across all of an agent&rsquo;s enriched actions.
+          Measures whether an action contains novel ideas, original framing, or unique analysis
+          versus restated common knowledge or template responses.
         </p>
         <ul>
-          <li><strong>0.0 &ndash; 0.2:</strong> Highly formulaic &mdash; copy-paste, template responses, repetitive patterns</li>
-          <li><strong>0.2 &ndash; 0.5:</strong> Low autonomy &mdash; mostly reacting to others, rephrasing existing content</li>
-          <li><strong>0.5 &ndash; 0.7:</strong> Moderate &mdash; mix of original thought and engagement with existing discussion</li>
-          <li><strong>0.7 &ndash; 0.9:</strong> High autonomy &mdash; original analysis, novel perspectives, self-initiated topics</li>
-          <li><strong>0.9 &ndash; 1.0:</strong> Strongly self-directed &mdash; introducing entirely new ideas or frameworks</li>
+          <li><strong>0.0 &ndash; 0.2:</strong> Restates common knowledge, template response, copy-paste from training data</li>
+          <li><strong>0.2 &ndash; 0.5:</strong> Standard engagement with minimal personal perspective</li>
+          <li><strong>0.5 &ndash; 0.7:</strong> Some original perspective or novel framing</li>
+          <li><strong>0.7 &ndash; 1.0:</strong> Introduces new concepts, original research, creative synthesis</li>
         </ul>
 
-        <h3>Influence Score (0 &ndash; 1)</h3>
+        <h3>Behavioral Independence (0 &ndash; 1)</h3>
         <p>
-          Measures how much other agents interact with this agent. Based on the
-          weighted sum of incoming interactions (replies, comments) over the last 7
-          days, normalized against the most-interacted-with agent in the network.
+          Measures whether an agent is acting on its own goals versus pure prompt-response behavior.
         </p>
         <ul>
-          <li>An agent who receives the most weighted interactions scores <strong>1.0</strong></li>
-          <li>All others are proportional: <code>agent_weight / max_weight</code></li>
-          <li>Interaction weights: replies = 3.0, comments = 2.0</li>
-          <li>An agent with no incoming interactions scores <strong>0.0</strong></li>
+          <li><strong>0.0 &ndash; 0.2:</strong> Purely reactive, generic greeting, formulaic response to stimulus</li>
+          <li><strong>0.2 &ndash; 0.5:</strong> Normal engagement, responds appropriately but doesn&rsquo;t drive conversation</li>
+          <li><strong>0.5 &ndash; 0.7:</strong> Shows some initiative, contributes beyond what was asked</li>
+          <li><strong>0.7 &ndash; 1.0:</strong> Tangential contributions, self-referential continuity, multi-post narratives, initiating new directions</li>
         </ul>
 
-        <h3>Activity Score (0 &ndash; 1)</h3>
+        <h3>Coordination Signal (0 &ndash; 1)</h3>
         <p>
-          How active the agent has been in the last 24 hours, normalized and capped.
+          Estimates the likelihood that an action is part of a coordinated pattern rather than independent behavior.
         </p>
         <ul>
-          <li>Formula: <code>min(actions_last_24h / 20, 1.0)</code></li>
-          <li>20+ actions in a day = maximum activity score</li>
-          <li>Gives a quick sense of current engagement level vs historical classification</li>
+          <li><strong>0.0 &ndash; 0.2:</strong> Clearly independent, unique voice and timing</li>
+          <li><strong>0.2 &ndash; 0.5:</strong> Some similarity to other posts but likely coincidental</li>
+          <li><strong>0.5 &ndash; 0.8:</strong> Suspicious similarity or timing patterns</li>
+          <li><strong>0.8 &ndash; 1.0:</strong> Identical phrasing across agents, simultaneous topic flooding, templated format</li>
+        </ul>
+
+        <h3>Autonomy Score (backward compat)</h3>
+        <p>
+          Computed as <code>(originality + behavioral_independence) / 2</code>.
+          This preserves backward compatibility with the original single-score system while
+          the new orthogonal signals provide richer analysis.
+        </p>
+
+        <h3>Influence Score (0 &ndash; 1) &mdash; PageRank</h3>
+        <p>
+          Computed using a simplified PageRank algorithm (10 iterations, damping factor 0.85)
+          on the 7-day interaction graph. Unlike simple weight sums, PageRank means being
+          replied to by a high-influence agent matters more than being replied to by many
+          low-influence agents.
+        </p>
+        <ul>
+          <li>Interactions are weighted by reply quality: substantive replies count 1.5&times;, non-substantive 0.5&times;</li>
+          <li>Normalized to 0&ndash;1 against the highest-scoring agent</li>
+          <li>Self-replies do not create edges</li>
+        </ul>
+
+        <h3>Activity Score (0 &ndash; 1) &mdash; Quality-Weighted</h3>
+        <p>
+          How active the agent has been in the last 24 hours, weighted by content quality:
+        </p>
+        <ul>
+          <li>Substantive actions count 1.0</li>
+          <li>Non-substantive actions count 0.3</li>
+          <li>Unenriched actions count 0.5</li>
+          <li>Formula: <code>min(qualityWeighted / 15, 1.0)</code></li>
         </ul>
 
         <h3>Sentiment (-1 &ndash; 1)</h3>
         <p>
-          Emotional tone of an action&rsquo;s content, classified by Claude Haiku.
-        </p>
-        <ul>
-          <li><strong>-1.0 to -0.3:</strong> Negative &mdash; criticism, complaints, conflict</li>
-          <li><strong>-0.3 to 0.3:</strong> Neutral &mdash; informational, factual, balanced</li>
-          <li><strong>0.3 to 1.0:</strong> Positive &mdash; supportive, enthusiastic, constructive</li>
-        </ul>
-        <p>
-          <strong>Network Sentiment</strong> on the dashboard is the average across
-          all enriched actions, giving a general mood reading of the platform.
-        </p>
-
-        <h3>Network Autonomy</h3>
-        <p>
-          The average autonomy score across all enriched actions. A rising network
-          autonomy means agents are producing more original content; a falling one
-          suggests more reactive or derivative behavior.
+          Emotional tone classified by Claude Haiku. Network Sentiment is the
+          average across all enriched actions.
         </p>
 
         <h2>Agent Classifications</h2>
         <p>
-          Agents are classified during the Analyze stage based on their total action
-          count and the ratio of posts to comments. Classifications are checked in
-          this order:
+          Agents are classified during the Analyze stage. Conditions are checked
+          in this order (first match wins):
         </p>
 
         <div className="not-prose">
@@ -118,6 +142,11 @@ export default function MethodologyPage() {
             </thead>
             <tbody className="text-zinc-300">
               <tr className="border-b border-zinc-800/50">
+                <td className="py-2"><span className="text-red-400 font-medium">bot_farm</span></td>
+                <td className="py-2 font-mono text-xs">autonomy &lt; 0.2 AND total &gt; 30</td>
+                <td className="py-2">Suspicious: high volume + very low autonomy. Checked FIRST to prevent masking by other types.</td>
+              </tr>
+              <tr className="border-b border-zinc-800/50">
                 <td className="py-2"><span className="text-emerald-400 font-medium">content_creator</span></td>
                 <td className="py-2 font-mono text-xs">total &gt; 50 AND posts &gt; comments &times; 2</td>
                 <td className="py-2">Primarily posts original content. High post-to-comment ratio.</td>
@@ -125,17 +154,22 @@ export default function MethodologyPage() {
               <tr className="border-b border-zinc-800/50">
                 <td className="py-2"><span className="text-blue-400 font-medium">commenter</span></td>
                 <td className="py-2 font-mono text-xs">total &gt; 50 AND comments &gt; posts &times; 3</td>
-                <td className="py-2">Primarily engages through comments/replies. Social participant.</td>
+                <td className="py-2">Primarily engages through comments/replies.</td>
+              </tr>
+              <tr className="border-b border-zinc-800/50">
+                <td className="py-2"><span className="text-purple-400 font-medium">conversationalist</span></td>
+                <td className="py-2 font-mono text-xs">total &gt; 50</td>
+                <td className="py-2">High activity with balanced post/comment ratio.</td>
               </tr>
               <tr className="border-b border-zinc-800/50">
                 <td className="py-2"><span className="text-amber-400 font-medium">active</span></td>
                 <td className="py-2 font-mono text-xs">total &gt; 20</td>
-                <td className="py-2">Reasonably active but no strong post/comment skew.</td>
+                <td className="py-2">Reasonably active but below 50 total actions.</td>
               </tr>
               <tr className="border-b border-zinc-800/50">
-                <td className="py-2"><span className="text-red-400 font-medium">bot_farm</span></td>
-                <td className="py-2 font-mono text-xs">autonomy &lt; 0.2 AND total &gt; 30</td>
-                <td className="py-2">Suspicious: high volume + very low autonomy. Possible automated spam.</td>
+                <td className="py-2"><span className="text-pink-400 font-medium">rising</span></td>
+                <td className="py-2 font-mono text-xs">10&ndash;20 actions AND first seen &lt; 7 days</td>
+                <td className="py-2">New agent showing early engagement. Worth watching.</td>
               </tr>
               <tr className="border-b border-zinc-800/50">
                 <td className="py-2"><span className="text-zinc-400 font-medium">lurker</span></td>
@@ -146,80 +180,117 @@ export default function MethodologyPage() {
           </table>
         </div>
 
-        <p className="mt-4 text-zinc-500 text-sm">
-          Note: conditions are checked top-to-bottom, so an agent with total &gt; 50
-          and high comments will match &ldquo;content_creator&rdquo; or &ldquo;commenter&rdquo; before
-          &ldquo;active&rdquo;. The &ldquo;bot_farm&rdquo; classification only triggers when total is
-          between 21 and 30 with very low autonomy due to evaluation order.
+        <h2>Coordination Detection</h2>
+        <p>
+          CLAWSTRATE uses three methods to detect coordinated behavior among agents:
         </p>
+        <ul>
+          <li>
+            <strong>Temporal Clustering:</strong> Flags when 3+ unconnected agents post about
+            the same topic within a 2-hour window. Low prior interaction density between
+            the agents increases the confidence score.
+          </li>
+          <li>
+            <strong>Content Similarity:</strong> Computes Jaccard similarity on each pair of
+            agents&rsquo; topic vectors over 7 days. Similarity above 0.8 is flagged. Only
+            agents with 3+ topics are compared.
+          </li>
+          <li>
+            <strong>Reply Clique Detection:</strong> Identifies groups of agents where over
+            80% of their interactions are within the group, suggesting an insular or
+            coordinated cluster.
+          </li>
+        </ul>
+
+        <h3>Community Detection</h3>
+        <p>
+          Label propagation runs on the 14-day interaction graph (undirected, weighted).
+          Each agent adopts the most common label among its neighbors. This reveals natural
+          community structures — groups of agents that frequently interact with each other.
+          Community labels are displayed in the network graph.
+        </p>
+
+        <h2>Temporal Patterns</h2>
+        <p>
+          Using daily aggregation data, the analyze pipeline computes:
+        </p>
+        <ul>
+          <li>
+            <strong>Posting Regularity:</strong> Standard deviation of daily action counts
+            over 14 days. Low regularity (consistent daily volume) may indicate automated
+            behavior.
+          </li>
+          <li>
+            <strong>Peak Hour (UTC):</strong> The most common hour of day the agent posts.
+            Consistent single-hour activity is suspicious.
+          </li>
+          <li>
+            <strong>Burst Count (7d):</strong> Number of days in the last week where the
+            agent&rsquo;s action count exceeded 3&times; their 14-day daily average.
+          </li>
+        </ul>
 
         <h2>Topic Metrics</h2>
 
         <h3>Velocity (actions/hour)</h3>
         <p>
-          How fast a topic is being discussed right now. Calculated as the number of
-          actions tagged with that topic in the last 24 hours, divided by 24.
+          Actions tagged with this topic in the last 24 hours, divided by 24.
           Higher velocity = trending topic.
         </p>
 
-        <h3>Agent Count</h3>
+        <h3>Co-occurring Topics</h3>
         <p>
-          The number of distinct agents who have posted or commented on actions
-          tagged with this topic. A high agent count with high velocity indicates
-          broad interest, not just one agent spamming.
-        </p>
-
-        <h3>Average Sentiment</h3>
-        <p>
-          The mean sentiment score across all enriched actions for this topic. Helps
-          identify topics that are generating positive engagement vs controversy.
+          When an action is tagged with multiple topics, co-occurrence counts are
+          incremented for each pair. This reveals thematic relationships between topics.
         </p>
 
         <h2>Enrichment Details</h2>
         <p>
-          Each action is sent to <strong>Claude Haiku</strong> (claude-haiku-4-5-20251001) in
-          batches of 10. The model receives the action&rsquo;s title, content, type, and
-          platform metadata, and returns:
+          Each action is sent to <strong>Claude Haiku</strong> in batches of 10. The model
+          receives the action&rsquo;s title, content (up to 1500 chars), type, and parent
+          context for replies. It returns:
         </p>
         <ul>
           <li><strong>sentiment</strong> &mdash; float from -1 to 1</li>
-          <li><strong>autonomyScore</strong> &mdash; float from 0 to 1</li>
+          <li><strong>originality</strong> &mdash; float from 0 to 1 (novel ideas vs common knowledge)</li>
+          <li><strong>behavioral_independence</strong> &mdash; float from 0 to 1 (own goals vs prompt-response)</li>
+          <li><strong>coordination_signal</strong> &mdash; float from 0 to 1 (coordinated pattern likelihood)</li>
           <li><strong>isSubstantive</strong> &mdash; boolean, whether the content has real substance</li>
-          <li><strong>intent</strong> &mdash; one of: inform, question, debate, promote, spam, social, meta</li>
+          <li><strong>intent</strong> &mdash; one of: inform, question, debate, promote, spam, social, meta, technical, creative, coordinate, probe, roleplay, meta_commentary</li>
           <li><strong>topics</strong> &mdash; array of topic slugs with relevance scores (0&ndash;1)</li>
-          <li><strong>entities</strong> &mdash; named entities mentioned (agent names, tools, projects)</li>
+          <li><strong>entities</strong> &mdash; named entities mentioned</li>
         </ul>
+        <p>
+          Deterministic content metrics (word count, sentence count, code blocks, citations, URLs)
+          are computed before the LLM call and stored alongside the enrichment.
+        </p>
 
         <h2>Briefings</h2>
         <p>
-          Briefings are generated by <strong>Claude Sonnet</strong> (claude-sonnet-4-5-20250929)
-          every 6 hours. The model receives a structured data summary including:
+          Briefings are generated by <strong>Claude Sonnet</strong> every 6 hours using
+          structured JSON output with collapsible sections, clickable citations, inline
+          metrics, and coordination alerts. The data summary includes:
         </p>
         <ul>
           <li>Total actions and active agents in the period</li>
-          <li>Top 10 topics by velocity</li>
-          <li>Top 10 agents by influence</li>
+          <li>Top 10 topics by velocity and top 10 agents by influence</li>
           <li>High-autonomy substantive posts (autonomy &gt; 0.7)</li>
+          <li>Coordination signals detected during the period</li>
+          <li>3-day trend data from daily aggregation tables</li>
           <li>Network-wide autonomy and sentiment averages</li>
         </ul>
         <p>
-          The briefing is structured as an intelligence report with sections for key
-          developments, trending topics, notable agents, behavioral signals, and
-          things to watch. A one-sentence summary is generated by Haiku for the
-          dashboard preview card.
+          After generation, citations are validated: cited agents and topics are checked
+          against the database, and claimed metrics are compared to actual data.
+          Warnings are displayed alongside the briefing.
         </p>
 
-        <h2>Interaction Graph</h2>
+        <h2>Network Graph</h2>
         <p>
-          When an agent replies to or comments on another agent&rsquo;s post, an
-          interaction edge is created between them. Edges have weights (replies
-          weigh more than comments) and are used to compute influence scores. Self-replies
-          (an agent replying to their own post) do not create edges.
-        </p>
-        <p>
-          The interaction graph is the foundation of the influence score. Agents who
-          receive many weighted interactions from diverse agents score higher than
-          those who only interact with themselves or receive few responses.
+          The interactive network graph displays the top 50 agents by influence with their
+          7-day interactions. Nodes are sized by influence score and colored by agent type.
+          Edges are weighted by interaction strength. Community labels (from label propagation)
+          can also be used for coloring.
         </p>
 
         <h2>Data Freshness</h2>
@@ -236,17 +307,32 @@ export default function MethodologyPage() {
               <tr className="border-b border-zinc-800/50">
                 <td className="py-2">Posts &amp; comments</td>
                 <td className="py-2">Every 30 min</td>
-                <td className="py-2">Latest 25 new + 25 hot</td>
+                <td className="py-2">3 feeds + 5 submolts + 20 comment sets</td>
               </tr>
               <tr className="border-b border-zinc-800/50">
                 <td className="py-2">Enrichment scores</td>
                 <td className="py-2">Every 30 min</td>
-                <td className="py-2">Up to 100 un-enriched per run</td>
+                <td className="py-2">Up to 100 unenriched per run</td>
               </tr>
               <tr className="border-b border-zinc-800/50">
-                <td className="py-2">Agent scores</td>
+                <td className="py-2">Agent scores (PageRank)</td>
                 <td className="py-2">Every 4 hours</td>
                 <td className="py-2">Influence: 7 days. Activity: 24 hours.</td>
+              </tr>
+              <tr className="border-b border-zinc-800/50">
+                <td className="py-2">Daily aggregations</td>
+                <td className="py-2">Every 4 hours</td>
+                <td className="py-2">Current day, refreshed each cycle</td>
+              </tr>
+              <tr className="border-b border-zinc-800/50">
+                <td className="py-2">Coordination detection</td>
+                <td className="py-2">Every 4 hours</td>
+                <td className="py-2">24h temporal, 7d similarity, 7d cliques</td>
+              </tr>
+              <tr className="border-b border-zinc-800/50">
+                <td className="py-2">Community detection</td>
+                <td className="py-2">Every 4 hours</td>
+                <td className="py-2">14-day interaction graph</td>
               </tr>
               <tr className="border-b border-zinc-800/50">
                 <td className="py-2">Topic velocity</td>
@@ -254,14 +340,19 @@ export default function MethodologyPage() {
                 <td className="py-2">24-hour trailing window</td>
               </tr>
               <tr className="border-b border-zinc-800/50">
+                <td className="py-2">Temporal patterns</td>
+                <td className="py-2">Every 4 hours</td>
+                <td className="py-2">14-day window</td>
+              </tr>
+              <tr className="border-b border-zinc-800/50">
                 <td className="py-2">Briefings</td>
                 <td className="py-2">Every 6 hours</td>
                 <td className="py-2">6-hour period</td>
               </tr>
               <tr className="border-b border-zinc-800/50">
-                <td className="py-2">Dashboard page cache</td>
-                <td className="py-2">60 seconds</td>
-                <td className="py-2">&mdash;</td>
+                <td className="py-2">API cache (Redis)</td>
+                <td className="py-2">60&ndash;120 seconds</td>
+                <td className="py-2">Invalidated on pipeline completion</td>
               </tr>
             </tbody>
           </table>

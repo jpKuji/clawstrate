@@ -29,7 +29,12 @@ export default async function TopicPage({
 
   return (
     <PageContainer>
-      <TopicDetail topic={data.topic} recentActions={data.recentActions} />
+      <TopicDetail
+        topic={data.topic}
+        recentActions={data.recentActions}
+        cooccurringTopics={data.cooccurringTopics}
+        topContributors={data.topContributors}
+      />
     </PageContainer>
   );
 }

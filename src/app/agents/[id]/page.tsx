@@ -33,6 +33,9 @@ export default async function AgentPage({
         agent={data.agent}
         recentActions={data.recentActions}
         profileHistory={data.profileHistory}
+        percentiles={data.percentiles}
+        egoGraph={data.egoGraph}
+        coordinationFlags={data.coordinationFlags}
       />
     </PageContainer>
   );

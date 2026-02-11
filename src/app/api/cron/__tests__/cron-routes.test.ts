@@ -16,6 +16,7 @@ vi.mock("@/lib/pipeline/briefing", () => ({
 }));
 vi.mock("@/lib/redis", () => ({
   acquireLock: vi.fn(),
+  invalidateApiCaches: vi.fn().mockResolvedValue(undefined),
 }));
 
 import { GET as ingestHandler } from "@/app/api/cron/ingest/route";

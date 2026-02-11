@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { runEnrichment } from "@/lib/pipeline/enrich";
+import { detectCoordination, detectCommunities } from "@/lib/pipeline/coordination";
 import { acquireLock, invalidateApiCaches } from "@/lib/redis";
 
 export const maxDuration = 300; // 5 minutes max
@@ -18,15 +18,20 @@ async function handler(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const release = await acquireLock("enrich", 300);
+  const release = await acquireLock("coordination", 300);
   if (!release) {
     return NextResponse.json({ status: "skipped", reason: "already running" });
   }
 
   try {
-    const result = await runEnrichment();
+    const coordResult = await detectCoordination();
+    const communityResult = await detectCommunities();
     await invalidateApiCaches();
-    return NextResponse.json({ status: "completed", ...result });
+    return NextResponse.json({
+      status: "completed",
+      ...coordResult,
+      communities: communityResult,
+    });
   } catch (e: any) {
     return NextResponse.json(
       { status: "error", error: e.message },

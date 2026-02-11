@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { runEnrichment } from "@/lib/pipeline/enrich";
+import { runAggregation } from "@/lib/pipeline/aggregate";
 import { acquireLock, invalidateApiCaches } from "@/lib/redis";
 
 export const maxDuration = 300; // 5 minutes max
@@ -18,13 +18,13 @@ async function handler(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const release = await acquireLock("enrich", 300);
+  const release = await acquireLock("aggregate", 300);
   if (!release) {
     return NextResponse.json({ status: "skipped", reason: "already running" });
   }
 
   try {
-    const result = await runEnrichment();
+    const result = await runAggregation();
     await invalidateApiCaches();
     return NextResponse.json({ status: "completed", ...result });
   } catch (e: any) {

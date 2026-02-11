@@ -11,6 +11,11 @@ vi.mock("@/lib/db", () => ({
   },
 }));
 
+vi.mock("@/lib/redis", () => ({
+  cacheGet: vi.fn().mockResolvedValue(null),
+  cacheSet: vi.fn().mockResolvedValue(undefined),
+}));
+
 import { GET as listTopics } from "@/app/api/v1/topics/route";
 import { GET as getTopic } from "@/app/api/v1/topics/[slug]/route";
 

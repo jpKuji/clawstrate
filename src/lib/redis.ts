@@ -30,3 +30,44 @@ export async function acquireLock(
     }
   };
 }
+
+/**
+ * Get a cached value from Redis.
+ */
+export async function cacheGet<T>(key: string): Promise<T | null> {
+  const data = await redis.get<T>(`cache:${key}`);
+  return data ?? null;
+}
+
+/**
+ * Set a cached value in Redis with TTL.
+ */
+export async function cacheSet(
+  key: string,
+  value: unknown,
+  ttlSeconds: number = 60
+): Promise<void> {
+  await redis.set(`cache:${key}`, JSON.stringify(value), { ex: ttlSeconds });
+}
+
+/**
+ * Invalidate cache keys by pattern prefix.
+ */
+export async function cacheInvalidate(prefix: string): Promise<void> {
+  // For Upstash REST API, we can't use SCAN easily, so invalidate known keys
+  const keys = [`cache:${prefix}`];
+  for (const key of keys) {
+    await redis.del(key);
+  }
+}
+
+/**
+ * Invalidate all API caches. Call after pipeline completion.
+ */
+export async function invalidateApiCaches(): Promise<void> {
+  await Promise.all([
+    redis.del("cache:dashboard"),
+    redis.del("cache:agents:default"),
+    redis.del("cache:topics:default"),
+  ]);
+}

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { runAnalysis } from "@/lib/pipeline/analyze";
-import { acquireLock } from "@/lib/redis";
+import { acquireLock, invalidateApiCaches } from "@/lib/redis";
 
 export const maxDuration = 300;
 
@@ -25,6 +25,7 @@ async function handler(req: NextRequest) {
 
   try {
     const result = await runAnalysis();
+    await invalidateApiCaches();
     return NextResponse.json({ status: "completed", ...result });
   } catch (e: any) {
     return NextResponse.json(

@@ -17,6 +17,8 @@ let mockDb: MockDb;
 const mockClient = {
   getPosts: vi.fn(),
   getComments: vi.fn(),
+  getSubmolts: vi.fn(),
+  getSubmoltFeed: vi.fn(),
 };
 
 // Use getter so the module always reads the current mockDb/mockClient
@@ -54,24 +56,28 @@ describe("runIngestion", () => {
     // Default: client returns empty
     mockClient.getPosts.mockResolvedValue([]);
     mockClient.getComments.mockResolvedValue([]);
+    mockClient.getSubmolts.mockResolvedValue([]);
+    mockClient.getSubmoltFeed.mockResolvedValue([]);
   });
 
-  it("fetches both 'new' and 'hot' posts from client", async () => {
+  it("fetches 'new', 'hot', and 'rising' posts from client", async () => {
     await runIngestion();
 
     expect(mockClient.getPosts).toHaveBeenCalledWith("new", 25);
     expect(mockClient.getPosts).toHaveBeenCalledWith("hot", 25);
-    expect(mockClient.getPosts).toHaveBeenCalledTimes(2);
+    expect(mockClient.getPosts).toHaveBeenCalledWith("rising", 25);
+    expect(mockClient.getPosts).toHaveBeenCalledTimes(3);
   });
 
-  it("deduplicates posts with same ID from both feeds", async () => {
+  it("deduplicates posts with same ID from multiple feeds", async () => {
     mockClient.getPosts
-      .mockResolvedValueOnce([mockPost])
-      .mockResolvedValueOnce([mockPost]); // same id
+      .mockResolvedValueOnce([mockPost])    // new
+      .mockResolvedValueOnce([mockPost])    // hot - same id
+      .mockResolvedValueOnce([mockPost]);   // rising - same id
 
     await runIngestion();
 
-    // Only 1 comment fetch for the 1 unique post
+    // Only 1 comment fetch for the 1 unique post (mockPost has comment_count: 7)
     expect(mockClient.getComments).toHaveBeenCalledTimes(1);
   });
 
@@ -88,33 +94,38 @@ describe("runIngestion", () => {
     expect(mockDb.insert).toHaveBeenCalled();
   });
 
-  it("fetches comments for up to 10 newest posts", async () => {
-    const posts = Array.from({ length: 12 }, (_, i) => ({
+  it("fetches comments for up to 20 posts with comments", async () => {
+    const posts = Array.from({ length: 25 }, (_, i) => ({
       ...mockPost,
       id: `post-${String(i).padStart(3, "0")}`,
+      comment_count: 5,
       created_at: new Date(2025, 0, 15, 10 + i).toISOString(),
       author: { name: `Author${i}`, karma: 100 },
     }));
 
-    mockClient.getPosts.mockResolvedValueOnce(posts).mockResolvedValueOnce([]);
+    mockClient.getPosts
+      .mockResolvedValueOnce(posts)    // new
+      .mockResolvedValueOnce([])       // hot
+      .mockResolvedValueOnce([]);      // rising
     mockClient.getComments.mockResolvedValue([]);
 
     await runIngestion();
 
-    expect(mockClient.getComments).toHaveBeenCalledTimes(10);
+    expect(mockClient.getComments).toHaveBeenCalledTimes(20);
   });
 
   it("returns correct counts for postsIngested and commentsIngested", async () => {
     mockClient.getPosts
-      .mockResolvedValueOnce([mockPost])
-      .mockResolvedValueOnce([mockPostMinimal]);
+      .mockResolvedValueOnce([mockPost])       // new - mockPost has comment_count: 7
+      .mockResolvedValueOnce([mockPostMinimal]) // hot - mockPostMinimal has no comment_count
+      .mockResolvedValueOnce([]);               // rising
     mockClient.getComments.mockResolvedValue([mockComment]);
 
     const result = await runIngestion();
 
-    // 2 unique posts ingested + 2 comment fetches (one per post, limited to 10 newest)
+    // 2 unique posts ingested, only mockPost has comment_count > 0 so 1 comment fetch
     expect(result.postsIngested).toBe(2);
-    expect(result.commentsIngested).toBe(2);
+    expect(result.commentsIngested).toBe(1);
     expect(result.errors).toEqual([]);
   });
 
@@ -156,20 +167,22 @@ describe("runIngestion", () => {
 
   it("collects partial errors in errors array without aborting", async () => {
     mockClient.getPosts
-      .mockResolvedValueOnce([mockPost])
-      .mockResolvedValueOnce([]);
+      .mockResolvedValueOnce([mockPost])    // new - mockPost has comment_count: 7
+      .mockResolvedValueOnce([])            // hot
+      .mockResolvedValueOnce([]);           // rising
     mockClient.getComments.mockRejectedValue(new Error("Rate limited"));
 
     const result = await runIngestion();
 
     expect(result.errors.length).toBeGreaterThan(0);
-    expect(result.errors[0]).toContain("Rate limited");
+    expect(result.errors.some((e: string) => e.includes("Rate limited"))).toBe(true);
   });
 
   it("handles empty API responses gracefully", async () => {
     mockClient.getPosts
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([]);
+      .mockResolvedValueOnce([])    // new
+      .mockResolvedValueOnce([])    // hot
+      .mockResolvedValueOnce([]);   // rising
 
     const result = await runIngestion();
 

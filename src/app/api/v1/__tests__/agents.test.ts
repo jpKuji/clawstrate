@@ -11,6 +11,11 @@ vi.mock("@/lib/db", () => ({
   },
 }));
 
+vi.mock("@/lib/redis", () => ({
+  cacheGet: vi.fn().mockResolvedValue(null),
+  cacheSet: vi.fn().mockResolvedValue(undefined),
+}));
+
 import { GET as listAgents } from "@/app/api/v1/agents/route";
 import { GET as getAgent } from "@/app/api/v1/agents/[id]/route";
 

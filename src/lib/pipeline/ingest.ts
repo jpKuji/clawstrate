@@ -36,7 +36,7 @@ export async function runIngestion(): Promise<{
 
   try {
     // 1. Fetch posts from multiple sort orders
-    const [newPosts, hotPosts] = await Promise.all([
+    const [newPosts, hotPosts, risingPosts] = await Promise.all([
       client.getPosts("new", 25).catch((e) => {
         errors.push(`new posts: ${e.message}`);
         return [];
@@ -45,16 +45,45 @@ export async function runIngestion(): Promise<{
         errors.push(`hot posts: ${e.message}`);
         return [];
       }),
+      client.getPosts("rising", 25).catch((e) => {
+        errors.push(`rising posts: ${e.message}`);
+        return [];
+      }),
     ]);
 
     // Deduplicate by post ID
     const allPosts = new Map<string, typeof newPosts[0]>();
-    for (const p of [...newPosts, ...hotPosts]) {
+    for (const p of [...newPosts, ...hotPosts, ...risingPosts]) {
       if (p?.id) allPosts.set(p.id, p);
     }
 
+    // Fetch top submolts for broader coverage
+    try {
+      const submolts = await client.getSubmolts();
+      const topSubmolts = submolts
+        .sort((a, b) => (b.post_count || 0) - (a.post_count || 0))
+        .slice(0, 5);
+
+      for (const submolt of topSubmolts) {
+        try {
+          const submoltPosts = await client.getSubmoltFeed(
+            submolt.name,
+            "new",
+            10
+          );
+          for (const p of submoltPosts) {
+            if (p?.id) allPosts.set(p.id, p);
+          }
+        } catch (e: any) {
+          errors.push(`submolt ${submolt.name}: ${e.message}`);
+        }
+      }
+    } catch (e: any) {
+      errors.push(`submolts list: ${e.message}`);
+    }
+
     console.log(
-      `[ingest] Fetched ${allPosts.size} unique posts (${newPosts.length} new, ${hotPosts.length} hot)`
+      `[ingest] Fetched ${allPosts.size} unique posts (${newPosts.length} new, ${hotPosts.length} hot, ${risingPosts.length} rising + submolt feeds)`
     );
 
     // 2. Map and ingest each post
@@ -64,14 +93,16 @@ export async function runIngestion(): Promise<{
       normalizedActions.push(mapPost(post));
     }
 
-    // 3. Fetch comments for posts we haven't seen before (or all, to catch new comments)
-    // To stay within rate limits, only fetch comments for the newest 10 posts
+    // 3. Fetch comments for posts with high engagement + newest posts
     const postsForComments = [...allPosts.values()]
-      .sort(
-        (a, b) =>
-          new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-      )
-      .slice(0, 10);
+      .sort((a, b) => {
+        // Prioritize posts with more comments, then by recency
+        const aScore = (a.comment_count || 0) * 10 + new Date(a.created_at).getTime() / 1e12;
+        const bScore = (b.comment_count || 0) * 10 + new Date(b.created_at).getTime() / 1e12;
+        return bScore - aScore;
+      })
+      .filter((p) => (p.comment_count || 0) > 0)
+      .slice(0, 20);
 
     for (const post of postsForComments) {
       try {
