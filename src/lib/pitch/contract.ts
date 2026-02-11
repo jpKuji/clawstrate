@@ -66,8 +66,7 @@ export function buildLlmsTxt(pitch: PitchContent): string {
 - [/pitch/transcript.md] : Full video transcript (edited)
 
 ## Media
-- [${normalizeContractPath(pitch.links.video)}] : Pitch video
-- [/pitch/transcript/pitch.vtt] : Captions
+- [${normalizeContractPath(pitch.links.video)}] : Pitch video (subtitles embedded)
 - [${normalizeContractPath(pitch.links.deck)}] : Pitch deck (optional)
 
 ## Contract

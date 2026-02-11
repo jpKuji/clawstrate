@@ -59,7 +59,7 @@ export default function PitchPage() {
           </div>
         </section>
 
-        <VideoSection videoSrc={pitch.links.video} captionsSrc="/pitch/transcript/pitch.vtt" />
+        <VideoSection videoSrc={pitch.links.video} />
 
         <TldrSection points={tldrPoints} />
 
