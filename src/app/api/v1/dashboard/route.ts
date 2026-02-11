@@ -108,9 +108,11 @@ export async function GET(req?: NextRequest) {
         lt(actions.performedAt, last24h),
         sourceActionFilter,
       )),
-    db.query.narratives.findFirst({
-      orderBy: (n, { desc }) => [desc(n.generatedAt)],
-    }),
+    source === "all"
+      ? db.query.narratives.findFirst({
+          orderBy: (n, { desc }) => [desc(n.generatedAt)],
+        })
+      : Promise.resolve(null),
     source === "all"
       ? db.query.topics.findMany({
           orderBy: (t, { desc }) => [desc(t.velocity)],

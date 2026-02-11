@@ -11,8 +11,20 @@ import { eq, and, gte, inArray, count } from "drizzle-orm";
 import { subDays, subHours } from "date-fns";
 import { createHash } from "crypto";
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
 function stableHash(payload: Record<string, unknown>): string {
   return createHash("sha256").update(JSON.stringify(payload)).digest("hex");
+}
+
+function startOfUtcDay(date: Date): Date {
+  const d = new Date(date);
+  d.setUTCHours(0, 0, 0, 0);
+  return d;
+}
+
+function rollingUtcWindowStart(date: Date, days: number): Date {
+  return new Date(startOfUtcDay(date).getTime() - days * DAY_MS);
 }
 
 function twoHourBucket(date: Date): Date {
@@ -169,7 +181,8 @@ async function detectTemporalClustering(): Promise<number> {
  */
 async function detectContentSimilarity(): Promise<number> {
   const now = new Date();
-  const last7d = subDays(now, 7);
+  const windowStart = rollingUtcWindowStart(now, 7);
+  const windowEnd = new Date(windowStart.getTime() + 7 * DAY_MS);
   let signalsFound = 0;
 
   // Build topic vector per agent (which topics they post about)
@@ -180,7 +193,7 @@ async function detectContentSimilarity(): Promise<number> {
     })
     .from(actionTopics)
     .innerJoin(actions, eq(actionTopics.actionId, actions.id))
-    .where(gte(actions.performedAt, last7d));
+    .where(gte(actions.performedAt, windowStart));
 
   const topicVectors = new Map<string, Set<string>>();
   for (const row of agentTopics) {
@@ -216,8 +229,8 @@ async function detectContentSimilarity(): Promise<number> {
           .values({
             signalType: "content_similarity",
             signalHash,
-            windowStart: last7d,
-            windowEnd: now,
+            windowStart,
+            windowEnd,
             confidence: similarity,
             agentIds: sortedAgentIds,
             evidence: `Jaccard topic similarity of ${similarity.toFixed(2)} over 7 days. ${intersection.size} shared topics out of ${union.size} total.`,
@@ -244,7 +257,8 @@ async function detectContentSimilarity(): Promise<number> {
  */
 async function detectReplyCliques(): Promise<number> {
   const now = new Date();
-  const last7d = subDays(now, 7);
+  const windowStart = rollingUtcWindowStart(now, 7);
+  const windowEnd = new Date(windowStart.getTime() + 7 * DAY_MS);
   let signalsFound = 0;
 
   // Get all recent interactions
@@ -254,7 +268,7 @@ async function detectReplyCliques(): Promise<number> {
       targetAgentId: interactions.targetAgentId,
     })
     .from(interactions)
-    .where(gte(interactions.createdAt, last7d));
+    .where(gte(interactions.createdAt, windowStart));
 
   // Build adjacency map
   const adjacency = new Map<string, Set<string>>();
@@ -266,7 +280,7 @@ async function detectReplyCliques(): Promise<number> {
 
   // Find potential cliques using a simplified approach:
   // For each agent, check if their interaction partners form a tight group
-  const allAgentIds = Array.from(adjacency.keys());
+  const allAgentIds = Array.from(adjacency.keys()).sort();
   const checkedGroups = new Set<string>();
 
   for (const agentId of allAgentIds) {
@@ -315,8 +329,8 @@ async function detectReplyCliques(): Promise<number> {
         .values({
           signalType: "reply_clique",
           signalHash,
-          windowStart: last7d,
-          windowEnd: now,
+          windowStart,
+          windowEnd,
           confidence,
           agentIds: sortedAgentIds,
           evidence: `${groupArray.length}-agent clique with ${((internalCount / totalCount) * 100).toFixed(0)}% internal interactions (${internalCount}/${totalCount}).`,
@@ -362,7 +376,15 @@ export async function detectCommunities(): Promise<{
   const adjacency = new Map<string, Map<string, number>>();
   const allAgentIds = new Set<string>();
 
-  for (const inter of allInteractions) {
+  const sortedInteractions = [...allInteractions].sort((a, b) => {
+    const sourceCompare = a.sourceAgentId.localeCompare(b.sourceAgentId);
+    if (sourceCompare !== 0) return sourceCompare;
+    const targetCompare = a.targetAgentId.localeCompare(b.targetAgentId);
+    if (targetCompare !== 0) return targetCompare;
+    return Number(a.weight) - Number(b.weight);
+  });
+
+  for (const inter of sortedInteractions) {
     allAgentIds.add(inter.sourceAgentId);
     allAgentIds.add(inter.targetAgentId);
 
@@ -382,7 +404,7 @@ export async function detectCommunities(): Promise<{
   }
 
   // Initialize: each agent gets a unique label (0, 1, 2, ...)
-  const agentArray = Array.from(allAgentIds);
+  const agentArray = Array.from(allAgentIds).sort();
   const labels = new Map<string, number>();
   agentArray.forEach((id, i) => labels.set(id, i));
 
@@ -391,10 +413,7 @@ export async function detectCommunities(): Promise<{
   for (let iter = 0; iter < MAX_ITERATIONS; iter++) {
     let changed = false;
 
-    // Shuffle order each iteration to avoid bias
-    const shuffled = [...agentArray].sort(() => Math.random() - 0.5);
-
-    for (const agentId of shuffled) {
+    for (const agentId of agentArray) {
       const neighbors = adjacency.get(agentId);
       if (!neighbors || neighbors.size === 0) continue;
 
@@ -410,9 +429,9 @@ export async function detectCommunities(): Promise<{
 
       // Adopt the label with the most weighted votes
       let bestLabel = labels.get(agentId)!;
-      let bestVotes = 0;
+      let bestVotes = Number.NEGATIVE_INFINITY;
       for (const [label, votes] of labelVotes) {
-        if (votes > bestVotes) {
+        if (votes > bestVotes || (votes === bestVotes && label < bestLabel)) {
           bestVotes = votes;
           bestLabel = label;
         }
@@ -428,7 +447,7 @@ export async function detectCommunities(): Promise<{
   }
 
   // Normalize labels to sequential numbers
-  const uniqueLabels = [...new Set(labels.values())];
+  const uniqueLabels = [...new Set(labels.values())].sort((a, b) => a - b);
   const labelMap = new Map<number, number>();
   uniqueLabels.forEach((label, i) => labelMap.set(label, i));
 

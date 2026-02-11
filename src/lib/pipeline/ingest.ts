@@ -7,7 +7,7 @@ import {
   interactions,
   syncLog,
 } from "../db/schema";
-import { eq, and } from "drizzle-orm";
+import { eq, and, sql } from "drizzle-orm";
 import { getEnabledSourceAdapters } from "../sources";
 import { NormalizedAction } from "../sources/types";
 
@@ -201,9 +201,7 @@ async function upsertAction(
     .update(agents)
     .set({
       lastSeenAt: action.performedAt,
-      totalActions: (await db.query.agents.findFirst({
-        where: eq(agents.id, agentId),
-      }))!.totalActions! + 1,
+      totalActions: sql`${agents.totalActions} + 1`,
     })
     .where(eq(agents.id, agentId));
 

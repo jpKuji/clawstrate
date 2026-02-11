@@ -161,10 +161,9 @@ export async function runAnalysis(): Promise<{
 
     const postCount =
       activityBreakdown.find((a) => a.actionType === "post")?.count || 0;
-    const commentCount =
-      activityBreakdown.find(
-        (a) => a.actionType === "comment" || a.actionType === "reply"
-      )?.count || 0;
+    const commentCount = activityBreakdown
+      .filter((a) => a.actionType === "comment" || a.actionType === "reply")
+      .reduce((sum, a) => sum + Number(a.count), 0);
 
     // Compute quality-weighted activity score (Phase 2.2)
     // Substantive actions count 1.0, non-substantive count 0.3

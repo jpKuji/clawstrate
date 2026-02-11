@@ -22,34 +22,9 @@ const client = new Client({ token: QSTASH_TOKEN });
 
 const schedules = [
   {
-    destination: `${BASE_URL}/api/cron/ingest`,
+    destination: `${BASE_URL}/api/cron/pipeline`,
     cron: "*/30 * * * *",
-    name: "clawstrate-ingest",
-  },
-  {
-    destination: `${BASE_URL}/api/cron/enrich`,
-    cron: "5,35 * * * *",
-    name: "clawstrate-enrich",
-  },
-  {
-    destination: `${BASE_URL}/api/cron/analyze`,
-    cron: "15 */4 * * *",
-    name: "clawstrate-analyze",
-  },
-  {
-    destination: `${BASE_URL}/api/cron/aggregate`,
-    cron: "20 */4 * * *",
-    name: "clawstrate-aggregate",
-  },
-  {
-    destination: `${BASE_URL}/api/cron/coordination`,
-    cron: "25 */4 * * *",
-    name: "clawstrate-coordination",
-  },
-  {
-    destination: `${BASE_URL}/api/cron/briefing`,
-    cron: "30 */6 * * *",
-    name: "clawstrate-briefing",
+    name: "clawstrate-pipeline",
   },
   {
     destination: `${BASE_URL}/api/cron/briefing-weekly`,

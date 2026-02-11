@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { NextRequest } from "next/server";
 import { createMockDb, type MockDb } from "@/__tests__/mocks/db";
 import { mockDbNarrative, mockDbAgent, mockDbTopic } from "@/__tests__/mocks/fixtures";
 
@@ -169,6 +170,28 @@ describe("GET /api/v1/dashboard", () => {
     // Should NOT include extra fields
     expect(agent).not.toHaveProperty("activityScore");
     expect(agent).not.toHaveProperty("totalActions");
+  });
+
+  it("does not return a global latestBriefing for source-filtered dashboard requests", async () => {
+    mockDb.select
+      .mockReturnValueOnce(chainableWith([{ count: 80 }])) // totalActions (source)
+      .mockReturnValueOnce(chainableWith([{ count: 12 }])) // totalAgents (source)
+      .mockReturnValueOnce(chainableWith([{ count: 20 }])) // recentActions
+      .mockReturnValueOnce(chainableWith([{ count: 15 }])) // previousActions
+      .mockReturnValueOnce(chainableWith([{ count: 10 }])) // previousAgents
+      .mockReturnValueOnce(chainableWith([{ avgAutonomy: 0.66, avgSentiment: 0.42 }])) // networkStats
+      .mockReturnValueOnce(chainableWith([{ avgAutonomy: 0.61, avgSentiment: 0.39 }])) // previousNetworkStats
+      .mockReturnValueOnce(chainableWith([])); // filteredTopicIds
+
+    mockDb.query.topics.findMany.mockResolvedValueOnce([]);
+    mockDb.query.agents.findMany.mockResolvedValueOnce([mockDbAgent]);
+
+    const req = new NextRequest("http://localhost/api/v1/dashboard?source=moltbook");
+    const res = await GET(req);
+    const body = await res.json();
+
+    expect(body.latestBriefing).toBeNull();
+    expect(mockDb.query.narratives.findFirst).not.toHaveBeenCalled();
   });
 });
 
