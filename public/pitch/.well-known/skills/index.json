@@ -1,0 +1,9 @@
+{
+  "skills": [
+    {
+      "id": "default",
+      "name": "clawstrate-pitch-pack",
+      "skill_md": "/pitch/.well-known/skills/default/skill.md"
+    }
+  ]
+}

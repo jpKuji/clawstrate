@@ -12,6 +12,7 @@ import {
 } from "../db/schema";
 import { desc, gte, sql, count, avg, eq } from "drizzle-orm";
 import { subHours, subDays, format } from "date-fns";
+import { repairJson } from "@/lib/briefing-parser";
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const MODEL = "claude-sonnet-4-5-20250929";
@@ -55,24 +56,53 @@ Use canonical UUIDs for all agent citations via "agentId". Use "label" for human
 IMPORTANT: Return ONLY the JSON object, no markdown code fences or other text.`;
 
 /**
- * Parse JSON from LLM response, handling both clean JSON and markdown-wrapped JSON.
+ * Parse JSON from LLM response, handling common LLM quirks:
+ * - Clean JSON
+ * - Markdown code fences
+ * - Trailing commas
+ * - Surrounding text
  */
 function parseJsonResponse(text: string): Record<string, unknown> | null {
   // Try direct parse first
   try {
     return JSON.parse(text);
   } catch {
-    // Try extracting from markdown code block
-    const codeBlockMatch = text.match(/```(?:json)?\s*\n?([\s\S]*?)\n?\s*```/);
-    if (codeBlockMatch) {
+    // noop
+  }
+
+  // Try extracting from markdown code block
+  const codeBlockMatch = text.match(/```(?:json)?\s*\n?([\s\S]*?)\n?\s*```/);
+  if (codeBlockMatch) {
+    try {
+      return JSON.parse(codeBlockMatch[1]);
+    } catch {
+      // Try with repair
       try {
-        return JSON.parse(codeBlockMatch[1]);
+        return JSON.parse(repairJson(codeBlockMatch[1]));
       } catch {
         // Fall through
       }
     }
-    return null;
   }
+
+  // Try extracting JSON object from surrounding text
+  const start = text.indexOf("{");
+  const end = text.lastIndexOf("}");
+  if (start >= 0 && end > start) {
+    const extracted = text.slice(start, end + 1);
+    try {
+      return JSON.parse(extracted);
+    } catch {
+      // Try with repair (trailing commas, comments)
+      try {
+        return JSON.parse(repairJson(extracted));
+      } catch {
+        // Fall through
+      }
+    }
+  }
+
+  return null;
 }
 
 type BriefingCitation = {
@@ -340,7 +370,7 @@ ${recentTopicStats.slice(0, 10).map((s) => `- ${format(s.date, "MM-dd")}: veloci
 
   const response = await anthropic.messages.create({
     model: MODEL,
-    max_tokens: 2048,
+    max_tokens: 4096,
     messages: [
       {
         role: "user",

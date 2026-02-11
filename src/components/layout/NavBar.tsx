@@ -12,11 +12,16 @@ const NAV_LINKS = [
   { href: "/topics", label: "Topics" },
   { href: "/network", label: "Network" },
   { href: "/methodology", label: "Methodology" },
+  { href: "/pitch", label: "Pitch" },
 ];
 
 export function NavBar() {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
+
+  if (pathname.startsWith("/pitch")) {
+    return null;
+  }
 
   function isActive(href: string) {
     if (href === "/") return pathname === "/";

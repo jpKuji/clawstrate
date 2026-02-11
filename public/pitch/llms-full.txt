@@ -1,0 +1,146 @@
+# Clawstrate - Full Pitch Context
+
+Version: 0.1
+Last updated: 2026-02-11
+
+## Table of contents
+1. /pitch/pitch.md
+2. /pitch/faq.md
+3. /pitch/transcript.md
+
+---
+
+# /pitch/pitch.md
+
+---
+title: "Clawstrate - The Bloomberg Terminal for the Agent Economy"
+version: "0.1"
+last_updated: "2026-02-11"
+canonical_urls:
+  human: "/pitch"
+  agent: "/pitch/agent"
+  llms: "/pitch/llms.txt"
+  transcript: "/pitch/transcript.md"
+  faq: "/pitch/faq.md"
+contact:
+  name: "Julian"
+  email: "julian@codecoast.ch"
+---
+
+# Executive Summary
+- One-liner: Real-time intelligence for 1.6M+ agents across Moltbook, ClawTask, and on-chain systems.
+- ICP: Pre-seed investors and crypto/AI analysts tracking the agent economy
+- Outcome: First-mover in agent economy intelligence with no incumbent
+- Why we win: Time-series behavioral data that compounds over time
+
+## Problem
+- The agent economy is real — 1.6M+ agents, real money flowing — but completely opaque.
+- No cross-platform visibility: each ecosystem is a silo with no unified view.
+- No intelligence layer exists to classify, rank, or surface agent behavior at scale.
+
+## Solution
+- Ingest agent behavior across Moltbook, ClawTask, on-chain, and GitHub ecosystems.
+- AI classification layer enriches raw data with sentiment, autonomy level, and intent signals.
+- Deliver 6-hour intelligence briefings, real-time dashboards, and API access.
+
+## Why now
+- $10M+ in x402 micropayment transactions already processed
+- ERC-8004 (agent identity standard) live on mainnet
+- 145K+ GitHub stars across agent frameworks
+- 1.6M+ registered agents on Moltbook alone
+
+## Product
+- Daily intelligence briefings delivered every 6 hours
+- Real-time dashboard with watchlists, alerts, and trend graphs
+- API and MCP endpoints for programmatic access
+- Agent micropayments via x402 for per-query billing
+
+## Business model
+- Free: daily intelligence briefing (top 10 agents, market summary)
+- Pro ($49/mo): full dashboard, watchlists, alerts, historical data
+- Enterprise/API ($2,499/mo): API access, bulk queries, custom briefings, dedicated support
+- Agent tier: x402 per-query micropayments for autonomous agent consumers
+
+## Traction
+- Stage: Prototype
+- Metrics:
+  - Data pipeline live with 30-minute polling across platforms
+  - 20+ agent platforms mapped and cataloged
+  - Infrastructure cost: $120/mo (lean solo-founder setup)
+- Proof points:
+  - Working ingestion pipeline processing live agent data
+  - AI enrichment producing sentiment and autonomy classifications
+  - Agent economy taxonomy covering 5 major ecosystems
+
+## Differentiation / Moat
+- Time-series behavioral data that compounds over time
+- Cross-platform adapters across 5+ ecosystems (hard to replicate)
+- Calibrated AI enrichment pipeline tuned to agent behavior patterns
+- Network effects: agent queries feed the intelligence layer
+
+## Ask
+- Looking for:
+  - $25K pre-seed to extend runway and ship Pro tier
+  - Crypto/AI investor introductions
+  - Design partners for early dashboard access
+- Use of funds:
+  - 12+ months infrastructure runway
+  - Cross-platform adapter development
+  - Pro tier launch and early user acquisition
+
+## Contact
+- Name: Julian
+- Email: julian@codecoast.ch
+
+---
+
+# /pitch/faq.md
+
+# FAQ
+
+## Is the agent economy real, or is this a fad?
+The data says real. Over $10M in x402 micropayments have been processed. ERC-8004 (the agent identity standard) is live on Ethereum mainnet. Agent frameworks have accumulated 145K+ GitHub stars. Moltbook alone has 1.6M+ registered agents. This is infrastructure being built and used today, not vaporware.
+
+## Can't Moltbook just build this?
+Moltbook is a platform — their incentive is to keep agents inside their ecosystem. Clawstrate is a cross-platform intelligence layer. We aggregate across Moltbook, ClawTask, on-chain systems, GitHub, and more. It's the same reason Bloomberg isn't built by the NYSE: the exchange and the terminal serve different roles.
+
+## What if the APIs change or platforms restrict access?
+Multi-platform by design. We already track 20+ platforms, so no single API dependency is existential. Adapters are modular — if one platform changes, we update one adapter without rebuilding the pipeline. The behavioral data we've already collected retains value regardless.
+
+## Why is $25K enough?
+Solo founder, lean infrastructure. The entire data pipeline runs at $120/month. $25K buys 12+ months of runway — enough to ship the Pro tier, build out cross-platform adapters, and onboard design partners. No office, no team overhead, just product development.
+
+## Who are the customers?
+Three tiers, in order of market readiness: (1) Human analysts and investors tracking agent ecosystems today — they pay for Pro dashboards. (2) Autonomous agents that need intelligence via API — they pay per query through x402 micropayments. (3) Long-term, platforms and funds that license aggregated intelligence data.
+
+## What's the competitive landscape?
+No direct competitor aggregates cross-platform agent intelligence. Moltbook analytics are platform-locked. Generic crypto dashboards like Dune and Nansen lack agent-specific data models. The closest analogy is being the first Bloomberg Terminal before anyone else realized the market needed one.
+
+## What are the top risks?
+- **Adoption pace:** The agent economy could grow slower than projected, delaying demand for intelligence tooling.
+- **API instability:** Platforms may change or restrict APIs, requiring adapter maintenance.
+- **Solo founder:** Single point of failure on execution — mitigated by lean scope and infrastructure automation.
+
+## What security model does this pitch pack use?
+This MVP is static-first and serves read-only endpoints. There is no authentication system, no account model, and no action execution interface.
+
+## How is prompt injection risk handled?
+The agent contract is explicitly information-only. `/skill.md` forbids command execution, secrets handling, and implicit trust of external links.
+
+---
+
+# /pitch/transcript.md
+
+# Transcript
+
+Speaker: There are 1.6 million autonomous agents registered on Moltbook alone — and nobody can tell you what they're actually doing. That's the problem we're solving.
+
+Speaker: The agent economy is real. Over ten million dollars in x402 micropayments have already been processed. ERC-8004 is live on mainnet. Agent frameworks have 145,000-plus GitHub stars. But there's no intelligence layer — no way to track, classify, or understand agent behavior across platforms.
+
+Speaker: Clawstrate is the Bloomberg Terminal for the agent economy. We ingest behavior data from Moltbook, ClawTask, on-chain systems, and GitHub. Our AI enrichment layer classifies every agent by sentiment, autonomy level, and intent — then delivers six-hour intelligence briefings and a real-time dashboard.
+
+Speaker: We already have a working data pipeline polling twenty-plus platforms every thirty minutes. Infrastructure runs at just $120 a month. The enrichment layer is producing live sentiment and autonomy classifications today.
+
+Speaker: The business model scales across four tiers. Free gets you a daily briefing. Pro at $49 a month unlocks the full dashboard with watchlists and alerts. Enterprise at $2,499 a month gets API access, bulk queries, and dedicated support. And our agent tier uses x402 micropayments — so autonomous agents can pay per query without a subscription.
+
+Speaker: We're raising $25K pre-seed. That gives us twelve-plus months of runway to ship the Pro tier, build out cross-platform adapters, and sign our first design partners. If you're tracking the agent economy, let's talk.

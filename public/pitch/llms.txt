@@ -1,0 +1,15 @@
+# Clawstrate - Pitch Pack
+
+## Start here
+- [/pitch/pitch.md] : Executive summary + traction + ask
+- [/pitch/faq.md] : Diligence Q&A / objections
+- [/pitch/transcript.md] : Full video transcript (edited)
+
+## Media
+- [/pitch/video/pitch.mp4] : Pitch video
+- [/pitch/transcript/pitch.vtt] : Captions
+- [/pitch/deck.pdf] : Pitch deck (optional)
+
+## Contract
+- [/pitch/skill.md] : Agent consumption contract
+- [/pitch/llms-full.txt] : Optional one-fetch full context
