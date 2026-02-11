@@ -11,12 +11,12 @@ export function MetricStrip({
   return (
     <div className="relative">
       {/* Top gradient accent line */}
-      <div className="h-px bg-gradient-to-r from-transparent via-emerald-500/40 to-transparent" />
+      <div className="h-px bg-gradient-to-r from-transparent via-[var(--accent-cyan)]/40 to-transparent" />
 
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-px bg-zinc-800/30">
         {entries.map((metric, i) => (
           <div key={i} className="bg-zinc-900/80 px-4 py-4">
-            <p className="text-[11px] uppercase tracking-widest text-zinc-500 mb-1">
+            <p className="text-[10px] uppercase tracking-widest text-accent mb-1">
               {metric.label}
             </p>
             <p className="text-2xl md:text-3xl font-bold tabular-nums text-zinc-100">

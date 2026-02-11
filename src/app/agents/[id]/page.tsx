@@ -28,7 +28,7 @@ export default async function AgentPage({
   if (!data) notFound();
 
   return (
-    <PageContainer>
+    <PageContainer backHref="/agents" backLabel="All agents">
       <AgentProfile
         agent={data.agent}
         recentActions={data.recentActions}

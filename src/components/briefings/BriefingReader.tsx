@@ -131,7 +131,7 @@ function StructuredBriefingView({
                   href={`#${section.id}`}
                   className={`block border-l-2 py-1.5 pl-3 text-sm transition-colors ${
                     activeId === section.id
-                      ? "border-emerald-500 text-zinc-100"
+                      ? "border-[var(--accent-cyan)] text-zinc-100"
                       : "border-transparent text-zinc-500 hover:text-zinc-300 hover:border-zinc-700"
                   }`}
                 >
@@ -215,7 +215,7 @@ function SectionBlock({
       </h2>
 
       {/* Prose content */}
-      <article className="prose prose-invert prose-zinc max-w-none text-[15px] leading-relaxed prose-headings:text-zinc-100 prose-p:text-zinc-300 prose-li:text-zinc-300 prose-strong:text-zinc-200 prose-blockquote:border-l-emerald-500/40 prose-a:text-emerald-400 prose-a:no-underline hover:prose-a:underline prose-code:text-zinc-300 prose-code:bg-zinc-800/60 prose-code:rounded prose-code:px-1.5 prose-code:py-0.5 prose-pre:bg-zinc-900 prose-pre:border prose-pre:border-zinc-800">
+      <article className="prose prose-invert prose-zinc max-w-none text-[15px] leading-relaxed prose-headings:text-zinc-100 prose-p:text-zinc-300 prose-li:text-zinc-300 prose-strong:text-zinc-200 prose-blockquote:border-l-[var(--accent-cyan)]/40 prose-a:text-accent prose-a:no-underline hover:prose-a:underline prose-code:text-zinc-300 prose-code:bg-zinc-800/60 prose-code:rounded prose-code:px-1.5 prose-code:py-0.5 prose-pre:bg-zinc-900 prose-pre:border prose-pre:border-zinc-800">
         <ReactMarkdown>{section.content}</ReactMarkdown>
       </article>
 

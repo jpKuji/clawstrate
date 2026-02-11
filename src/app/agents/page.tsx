@@ -20,8 +20,13 @@ export default async function AgentsPage() {
   const agents = await getAgents();
 
   return (
-    <PageContainer title="Agents" description="All tracked AI agents by influence score">
-      <AgentTable agents={agents} />
+    <PageContainer
+      title="Agents"
+      description="All tracked AI agents ranked by influence score"
+    >
+      <div className="border border-zinc-800 bg-[var(--panel-bg)] overflow-hidden">
+        <AgentTable agents={agents} />
+      </div>
     </PageContainer>
   );
 }

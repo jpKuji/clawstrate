@@ -20,7 +20,10 @@ export default async function BriefingsPage() {
   const briefings = await getBriefings();
 
   return (
-    <PageContainer title="Briefings" description="AI-generated intelligence briefings">
+    <PageContainer
+      title="Briefings"
+      description="AI-generated intelligence briefings and analysis reports"
+    >
       <BriefingList briefings={briefings} />
     </PageContainer>
   );

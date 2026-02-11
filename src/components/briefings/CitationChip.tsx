@@ -12,9 +12,9 @@ interface CitationChipProps {
 const TYPE_CONFIG = {
   agent: {
     icon: Bot,
-    bg: "bg-emerald-950/50 hover:bg-emerald-900/50",
-    text: "text-emerald-400",
-    border: "border-emerald-800/50",
+    bg: "bg-cyan-950/50 hover:bg-cyan-900/50",
+    text: "text-[var(--accent-cyan)]",
+    border: "border-cyan-800/50",
   },
   topic: {
     icon: Hash,

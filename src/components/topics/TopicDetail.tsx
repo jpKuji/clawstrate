@@ -100,27 +100,25 @@ export function TopicDetail({
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-zinc-100">{topic.name}</h1>
-        <p className="text-sm text-zinc-500 mt-1">/{topic.slug}</p>
+      <div className="border border-zinc-800 bg-zinc-900 p-4">
+        <h1 className="text-xl font-bold text-zinc-100">{topic.name}</h1>
+        <p className="text-xs text-zinc-500 mt-1 font-data">/{topic.slug}</p>
         {topic.description && (
           <p className="text-sm text-zinc-400 mt-2">{topic.description}</p>
         )}
       </div>
 
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-px bg-zinc-800">
         {[
           { label: "Velocity", value: `${(topic.velocity ?? 0).toFixed(2)}/hr` },
           { label: "Actions", value: topic.actionCount ?? 0 },
           { label: "Agents", value: topic.agentCount ?? 0 },
           { label: "Avg Sentiment", value: topic.avgSentiment != null ? topic.avgSentiment.toFixed(2) : "\u2014" },
         ].map((s) => (
-          <Card key={s.label} className="bg-zinc-900 border-zinc-800">
-            <CardContent className="pt-4">
-              <p className="text-xs text-zinc-400">{s.label}</p>
-              <p className="text-xl font-bold text-zinc-100">{s.value}</p>
-            </CardContent>
-          </Card>
+          <div key={s.label} className="bg-[var(--panel-bg)] p-4">
+            <p className="text-[10px] uppercase tracking-widest text-accent">{s.label}</p>
+            <p className="text-xl font-bold font-data text-zinc-100 mt-1">{s.value}</p>
+          </div>
         ))}
       </div>
 
@@ -128,7 +126,7 @@ export function TopicDetail({
       {sentimentBuckets.some((b) => b.count > 0) && (
         <Card className="bg-zinc-900 border-zinc-800">
           <CardHeader>
-            <CardTitle className="text-sm text-zinc-400">
+            <CardTitle className="text-[11px] uppercase tracking-widest text-accent">
               Sentiment Distribution
             </CardTitle>
           </CardHeader>
@@ -150,7 +148,7 @@ export function TopicDetail({
                   }}
                   labelStyle={{ color: "#a1a1aa" }}
                 />
-                <Bar dataKey="count" fill="#10b981" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="count" fill="#00e5cc" radius={[2, 2, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </CardContent>
@@ -161,7 +159,7 @@ export function TopicDetail({
       {activityData.length > 1 && (
         <Card className="bg-zinc-900 border-zinc-800">
           <CardHeader>
-            <CardTitle className="text-sm text-zinc-400">
+            <CardTitle className="text-[11px] uppercase tracking-widest text-accent">
               Activity Timeline
             </CardTitle>
           </CardHeader>
@@ -182,7 +180,7 @@ export function TopicDetail({
                     borderRadius: "8px",
                   }}
                 />
-                <Bar dataKey="count" fill="#3b82f6" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="count" fill="#3b82f6" radius={[2, 2, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </CardContent>
@@ -194,7 +192,7 @@ export function TopicDetail({
         {topContributors && topContributors.length > 0 && (
           <Card className="bg-zinc-900 border-zinc-800">
             <CardHeader>
-              <CardTitle className="text-sm text-zinc-400">
+              <CardTitle className="text-[11px] uppercase tracking-widest text-accent">
                 Top Contributors
               </CardTitle>
             </CardHeader>
@@ -225,7 +223,7 @@ export function TopicDetail({
         {cooccurringTopics && cooccurringTopics.length > 0 && (
           <Card className="bg-zinc-900 border-zinc-800">
             <CardHeader>
-              <CardTitle className="text-sm text-zinc-400">
+              <CardTitle className="text-[11px] uppercase tracking-widest text-accent">
                 Related Topics
               </CardTitle>
             </CardHeader>
@@ -257,7 +255,7 @@ export function TopicDetail({
       {/* Recent Actions */}
       <Card className="bg-zinc-900 border-zinc-800">
         <CardHeader>
-          <CardTitle className="text-sm text-zinc-400">Recent Actions</CardTitle>
+          <CardTitle className="text-[11px] uppercase tracking-widest text-accent">Recent Actions</CardTitle>
         </CardHeader>
         <CardContent>
           <div className="space-y-3">
@@ -285,7 +283,7 @@ export function TopicDetail({
                       <span
                         className={
                           item.sentiment > 0.3
-                            ? "text-emerald-500"
+                            ? "text-accent"
                             : item.sentiment < -0.3
                               ? "text-red-500"
                               : "text-zinc-500"

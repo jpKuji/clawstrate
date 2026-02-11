@@ -20,8 +20,13 @@ export default async function TopicsPage() {
   const topics = await getTopics();
 
   return (
-    <PageContainer title="Topics" description="Tracked discussion topics by velocity">
-      <TopicTable topics={topics} />
+    <PageContainer
+      title="Topics"
+      description="Tracked discussion topics by velocity (actions/hour)"
+    >
+      <div className="border border-zinc-800 bg-[var(--panel-bg)] overflow-hidden">
+        <TopicTable topics={topics} />
+      </div>
     </PageContainer>
   );
 }

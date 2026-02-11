@@ -85,47 +85,47 @@ export function AgentProfile({
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-start justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-zinc-100">{agent.displayName}</h1>
-          {agent.description && (
-            <p className="text-sm text-zinc-400 mt-1">{agent.description}</p>
-          )}
+      <div className="border border-zinc-800 bg-zinc-900 p-4">
+        <div className="flex items-start justify-between">
+          <div>
+            <h1 className="text-xl font-bold text-zinc-100">{agent.displayName}</h1>
+            {agent.description && (
+              <p className="text-sm text-zinc-400 mt-1">{agent.description}</p>
+            )}
+          </div>
+          <Badge
+            variant="outline"
+            className="border-zinc-700 text-zinc-400"
+          >
+            {agent.agentType || "unknown"}
+          </Badge>
         </div>
-        <Badge
-          variant="outline"
-          className="border-zinc-700 text-zinc-400"
-        >
-          {agent.agentType || "unknown"}
-        </Badge>
       </div>
 
       {/* Score Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-px bg-zinc-800">
         {[
           { label: "Influence", value: agent.influenceScore, percentile: percentiles?.influence },
           { label: "Autonomy", value: agent.autonomyScore, percentile: percentiles?.autonomy },
           { label: "Activity", value: agent.activityScore, percentile: percentiles?.activity },
           { label: "Total Actions", value: agent.totalActions },
         ].map((s) => (
-          <Card key={s.label} className="bg-zinc-900 border-zinc-800">
-            <CardContent className="pt-4">
-              <p className="text-xs text-zinc-400">{s.label}</p>
-              <p className="text-xl font-bold text-zinc-100">
-                {typeof s.value === "number" ? s.value.toFixed(2) : s.value ?? 0}
-              </p>
-              {s.percentile != null && (
-                <p className="text-xs text-zinc-500 mt-0.5">P{s.percentile}</p>
-              )}
-            </CardContent>
-          </Card>
+          <div key={s.label} className="bg-[var(--panel-bg)] p-4">
+            <p className="text-[10px] uppercase tracking-widest text-accent">{s.label}</p>
+            <p className="text-xl font-bold font-data text-zinc-100 mt-1">
+              {typeof s.value === "number" ? s.value.toFixed(2) : s.value ?? 0}
+            </p>
+            {s.percentile != null && (
+              <p className="text-xs text-zinc-500 mt-0.5 font-data">P{s.percentile}</p>
+            )}
+          </div>
         ))}
       </div>
 
       {/* Behavioral Fingerprint Radar */}
       <Card className="bg-zinc-900 border-zinc-800">
         <CardHeader>
-          <CardTitle className="text-sm text-zinc-400">Behavioral Fingerprint</CardTitle>
+          <CardTitle className="text-[11px] uppercase tracking-widest text-accent">Behavioral Fingerprint</CardTitle>
         </CardHeader>
         <CardContent className="flex justify-center">
           <ResponsiveContainer width={300} height={250}>
@@ -135,8 +135,8 @@ export function AgentProfile({
               <PolarRadiusAxis domain={[0, 1]} tick={{ fill: "#71717a", fontSize: 10 }} />
               <Radar
                 dataKey="value"
-                stroke="#10b981"
-                fill="#10b981"
+                stroke="#00e5cc"
+                fill="#00e5cc"
                 fillOpacity={0.2}
               />
             </RadarChart>
@@ -150,7 +150,7 @@ export function AgentProfile({
           {egoGraph.outgoing.length > 0 && (
             <Card className="bg-zinc-900 border-zinc-800">
               <CardHeader>
-                <CardTitle className="text-sm text-zinc-400">Top Outgoing Interactions</CardTitle>
+                <CardTitle className="text-[11px] uppercase tracking-widest text-accent">Top Outgoing Interactions</CardTitle>
               </CardHeader>
               <CardContent>
                 <div className="space-y-2">
@@ -172,7 +172,7 @@ export function AgentProfile({
           {egoGraph.incoming.length > 0 && (
             <Card className="bg-zinc-900 border-zinc-800">
               <CardHeader>
-                <CardTitle className="text-sm text-zinc-400">Top Incoming Interactions</CardTitle>
+                <CardTitle className="text-[11px] uppercase tracking-widest text-accent">Top Incoming Interactions</CardTitle>
               </CardHeader>
               <CardContent>
                 <div className="space-y-2">
@@ -198,7 +198,7 @@ export function AgentProfile({
       {coordinationFlags && coordinationFlags.length > 0 && (
         <Card className="bg-zinc-900 border-zinc-800">
           <CardHeader>
-            <CardTitle className="text-sm text-zinc-400">Coordination Signals</CardTitle>
+            <CardTitle className="text-[11px] uppercase tracking-widest text-accent">Coordination Signals</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="space-y-3">
@@ -235,7 +235,7 @@ export function AgentProfile({
       {chartData.length > 1 && (
         <Card className="bg-zinc-900 border-zinc-800">
           <CardHeader>
-            <CardTitle className="text-sm text-zinc-400">Score History</CardTitle>
+            <CardTitle className="text-[11px] uppercase tracking-widest text-accent">Score History</CardTitle>
           </CardHeader>
           <CardContent>
             <ResponsiveContainer width="100%" height={200}>
@@ -250,9 +250,9 @@ export function AgentProfile({
                   }}
                   labelStyle={{ color: "#a1a1aa" }}
                 />
-                <Line type="monotone" dataKey="influence" stroke="#10b981" strokeWidth={2} dot={false} />
+                <Line type="monotone" dataKey="influence" stroke="#00e5cc" strokeWidth={2} dot={false} />
                 <Line type="monotone" dataKey="autonomy" stroke="#3b82f6" strokeWidth={2} dot={false} />
-                <Line type="monotone" dataKey="activity" stroke="#f59e0b" strokeWidth={2} dot={false} />
+                <Line type="monotone" dataKey="activity" stroke="#10b981" strokeWidth={2} dot={false} />
               </LineChart>
             </ResponsiveContainer>
           </CardContent>
@@ -262,7 +262,7 @@ export function AgentProfile({
       {/* Recent Actions */}
       <Card className="bg-zinc-900 border-zinc-800">
         <CardHeader>
-          <CardTitle className="text-sm text-zinc-400">Recent Actions</CardTitle>
+          <CardTitle className="text-[11px] uppercase tracking-widest text-accent">Recent Actions</CardTitle>
         </CardHeader>
         <CardContent>
           <div className="space-y-3">

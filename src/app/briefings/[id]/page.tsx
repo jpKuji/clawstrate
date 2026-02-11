@@ -36,9 +36,9 @@ function MetaItem({
   if (value == null) return null;
   return (
     <div className="flex items-center gap-2 text-sm text-zinc-400">
-      <Icon className="size-4 text-zinc-500" />
+      <Icon className="size-4 text-zinc-600" />
       <span className="text-zinc-500">{label}:</span>
-      <span className="text-zinc-300 font-medium">{value}</span>
+      <span className="text-zinc-200 font-data font-medium">{value}</span>
     </div>
   );
 }
@@ -71,25 +71,25 @@ export default async function BriefingPage({
   return (
     <>
       <ReadingProgress />
-      <PageContainer>
+      <PageContainer backHref="/briefings" backLabel="All briefings">
         <BriefingViewTracker narrativeId={briefing.id} />
 
         {/* Hero header */}
-        <header className="mb-8">
+        <header className="mb-8 border border-zinc-800 bg-zinc-900 p-5">
           {/* Type pill + relative time */}
           <div className="flex items-center gap-3 mb-4">
             <BriefingTypePill type={briefing.type} />
-            <span className="text-sm text-zinc-500">{timeAgo}</span>
+            <span className="text-xs text-zinc-500 font-data">{timeAgo}</span>
           </div>
 
           {/* Title */}
-          <h1 className="text-3xl md:text-4xl font-bold tracking-tight text-zinc-100 mb-3">
+          <h1 className="text-2xl md:text-3xl font-bold tracking-tight text-zinc-100 mb-3">
             {briefing.title}
           </h1>
 
           {/* Summary */}
           {briefing.summary && (
-            <p className="text-lg text-zinc-400 max-w-3xl mb-6">
+            <p className="text-sm text-zinc-400 max-w-3xl mb-5">
               {briefing.summary}
             </p>
           )}
@@ -127,16 +127,18 @@ export default async function BriefingPage({
             </div>
           )}
 
-        <BriefingReader
-          content={briefing.content}
-          narrativeId={briefing.id}
-          skipMetrics={
-            !!(
-              structured?.metrics &&
-              Object.keys(structured.metrics).length > 0
-            )
-          }
-        />
+        <div className="border border-zinc-800 bg-[var(--panel-bg)] p-5">
+          <BriefingReader
+            content={briefing.content}
+            narrativeId={briefing.id}
+            skipMetrics={
+              !!(
+                structured?.metrics &&
+                Object.keys(structured.metrics).length > 0
+              )
+            }
+          />
+        </div>
       </PageContainer>
     </>
   );

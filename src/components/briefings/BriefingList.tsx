@@ -63,7 +63,7 @@ export function BriefingList({ briefings }: { briefings: Briefing[] }) {
                   )}
 
                   {/* Stats */}
-                  <div className="flex gap-4 mt-3 text-xs text-zinc-500">
+                  <div className="flex gap-4 mt-3 text-xs text-zinc-500 font-data">
                     {b.actionsAnalyzed != null && (
                       <span>{b.actionsAnalyzed} actions</span>
                     )}

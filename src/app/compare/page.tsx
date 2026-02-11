@@ -182,7 +182,7 @@ function CompareContent() {
       {/* Radar comparison */}
       <Card className="bg-zinc-900 border-zinc-800">
         <CardHeader>
-          <CardTitle className="text-sm text-zinc-400">
+          <CardTitle className="text-[11px] uppercase tracking-widest text-accent">
             Score Comparison
           </CardTitle>
         </CardHeader>
@@ -215,7 +215,7 @@ function CompareContent() {
       {historyData.length > 1 && (
         <Card className="bg-zinc-900 border-zinc-800">
           <CardHeader>
-            <CardTitle className="text-sm text-zinc-400">
+            <CardTitle className="text-[11px] uppercase tracking-widest text-accent">
               Influence History
             </CardTitle>
           </CardHeader>

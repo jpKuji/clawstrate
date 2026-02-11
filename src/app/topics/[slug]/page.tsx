@@ -28,7 +28,7 @@ export default async function TopicPage({
   if (!data) notFound();
 
   return (
-    <PageContainer>
+    <PageContainer backHref="/topics" backLabel="All topics">
       <TopicDetail
         topic={data.topic}
         recentActions={data.recentActions}
