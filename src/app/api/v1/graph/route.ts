@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { agents, interactions } from "@/lib/db/schema";
-import { desc, sql, count } from "drizzle-orm";
+import { desc, sql, count, and, inArray, gte } from "drizzle-orm";
 import { subDays } from "date-fns";
 
 export async function GET() {
-  const last7d = subDays(new Date(), 7);
+  const last30d = subDays(new Date(), 30);
 
   // Get top 50 agents by influence
   const topAgents = await db.query.agents.findMany({
@@ -25,7 +25,11 @@ export async function GET() {
     })
     .from(interactions)
     .where(
-      sql`${interactions.sourceAgentId} = ANY(${agentIds}) AND ${interactions.targetAgentId} = ANY(${agentIds}) AND ${interactions.createdAt} >= ${last7d}`
+      and(
+        inArray(interactions.sourceAgentId, agentIds),
+        inArray(interactions.targetAgentId, agentIds),
+        gte(interactions.createdAt, last30d)
+      )
     )
     .groupBy(interactions.sourceAgentId, interactions.targetAgentId);
 

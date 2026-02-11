@@ -8,7 +8,7 @@ import {
   enrichments,
   topicCooccurrences,
 } from "@/lib/db/schema";
-import { eq, desc, or, sql, count } from "drizzle-orm";
+import { eq, desc, or, sql, count, inArray } from "drizzle-orm";
 
 export async function GET(
   req: NextRequest,
@@ -45,7 +45,10 @@ export async function GET(
   // Co-occurring topics (Phase 2.5)
   const cooccurring = await db
     .select({
-      cooccurrenceCount: topicCooccurrences.cooccurrenceCount,
+      cooccurrenceCount:
+        sql<number>`SUM(${topicCooccurrences.cooccurrenceCount})`.as(
+          "cooccurrence_count"
+        ),
       relatedTopicId: sql<string>`CASE WHEN ${topicCooccurrences.topicId1} = ${topic.id} THEN ${topicCooccurrences.topicId2} ELSE ${topicCooccurrences.topicId1} END`.as("related_topic_id"),
     })
     .from(topicCooccurrences)
@@ -55,7 +58,16 @@ export async function GET(
         eq(topicCooccurrences.topicId2, topic.id)
       )
     )
-    .orderBy(desc(topicCooccurrences.cooccurrenceCount))
+    .groupBy(
+      sql`CASE WHEN ${topicCooccurrences.topicId1} = ${topic.id} THEN ${topicCooccurrences.topicId2} ELSE ${topicCooccurrences.topicId1} END`
+    )
+    .orderBy(
+      desc(
+        sql<number>`SUM(${topicCooccurrences.cooccurrenceCount})`.as(
+          "cooccurrence_count"
+        )
+      )
+    )
     .limit(10);
 
   // Get topic names for co-occurring topics
@@ -63,7 +75,7 @@ export async function GET(
   const relatedTopics =
     relatedTopicIds.length > 0
       ? await db.query.topics.findMany({
-          where: sql`${topics.id} = ANY(${relatedTopicIds})`,
+          where: inArray(topics.id, relatedTopicIds),
         })
       : [];
 

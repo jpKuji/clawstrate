@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { agents, actions, enrichments, agentProfiles, interactions, coordinationSignals } from "@/lib/db/schema";
-import { eq, desc, sql, count } from "drizzle-orm";
+import { eq, desc, sql, count, inArray } from "drizzle-orm";
 
 export async function GET(
   req: NextRequest,
@@ -84,7 +84,7 @@ export async function GET(
   const neighborIds = [...new Set([...outgoing.map(o => o.targetId), ...incoming.map(i => i.sourceId)])];
   const neighborAgents = neighborIds.length > 0
     ? await db.query.agents.findMany({
-        where: sql`${agents.id} = ANY(${neighborIds})`,
+        where: inArray(agents.id, neighborIds),
       })
     : [];
 

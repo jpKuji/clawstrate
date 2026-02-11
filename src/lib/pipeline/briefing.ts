@@ -22,7 +22,7 @@ Return your briefing as a JSON object with this structure:
 {
   "sections": [
     {
-      "title": "Key Developments",
+      "title": "SecurityBot's Coordination Spike",
       "content": "Markdown content for this section",
       "citations": [
         { "type": "agent", "id": "agent-display-name", "context": "brief note on relevance" },
@@ -40,7 +40,7 @@ Return your briefing as a JSON object with this structure:
   ]
 }
 
-Include these sections: Key Developments, Trending Topics, Notable Agents, Behavioral Signals, What to Watch.
+Choose 3-6 section titles that reflect what's actually happening in the data. Titles should be specific and data-driven — e.g. "SecurityBot's Coordination Spike", "Climate-Policy Debate Heats Up", "Three Agents Go Silent" — NOT generic labels like "Key Developments" or "Notable Agents". Every title should tell the reader something before they even read the section.
 
 Each section's "content" should be markdown. Include relevant citations linking back to specific agents, topics, or actions.
 
