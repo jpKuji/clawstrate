@@ -18,6 +18,14 @@ function ResizeHandle() {
   );
 }
 
+function HorizontalResizeHandle() {
+  return (
+    <Separator className="group relative flex items-center justify-center h-1">
+      <div className="h-px w-full bg-zinc-800 group-hover:bg-[var(--accent-cyan)] group-data-[resize-handle-active]:bg-[var(--accent-cyan)] transition-colors" />
+    </Separator>
+  );
+}
+
 interface ResizableDashboardGridProps {
   agentsPanel: React.ReactNode;
   topicsPanel: React.ReactNode;
@@ -51,40 +59,56 @@ function ResizableDesktop({
     storage,
   });
 
+  const rowsLayout = useDefaultLayout({
+    id: "dashboard-rows",
+    panelIds: ["row1", "row2"],
+    storage,
+  });
+
   return (
-    <div className="hidden lg:flex lg:flex-col lg:flex-1">
-      {/* Row 1: Agents | Topics */}
+    <div className="hidden lg:flex lg:flex-col lg:flex-1 lg:overflow-hidden">
       <Group
-        orientation="horizontal"
-        id="dashboard-row-1"
-        defaultLayout={row1Layout.defaultLayout}
+        orientation="vertical"
+        id="dashboard-rows"
+        defaultLayout={rowsLayout.defaultLayout}
       >
-        <Panel id="agents" defaultSize={50} minSize={30}>
-          {agentsPanel}
+        <Panel id="row1" defaultSize={50} minSize={25}>
+          {/* Row 1: Agents | Topics */}
+          <Group
+            orientation="horizontal"
+            id="dashboard-row-1"
+            defaultLayout={row1Layout.defaultLayout}
+          >
+            <Panel id="agents" defaultSize={50} minSize={30}>
+              <div className="h-full overflow-y-auto">{agentsPanel}</div>
+            </Panel>
+            <ResizeHandle />
+            <Panel id="topics" defaultSize={50} minSize={30}>
+              <div className="h-full overflow-y-auto">{topicsPanel}</div>
+            </Panel>
+          </Group>
         </Panel>
-        <ResizeHandle />
-        <Panel id="topics" defaultSize={50} minSize={30}>
-          {topicsPanel}
+        <HorizontalResizeHandle />
+        <Panel id="row2" defaultSize={50} minSize={25}>
+          {/* Row 2: Network | Briefing Preview */}
+          <Group
+            orientation="horizontal"
+            id="dashboard-row-2"
+            defaultLayout={row2Layout.defaultLayout}
+          >
+            <Panel id="network" defaultSize={50} minSize={30}>
+              <div className="h-full overflow-hidden">{networkPanel}</div>
+            </Panel>
+            <ResizeHandle />
+            <Panel id="briefing" defaultSize={50} minSize={30}>
+              <div className="h-full overflow-y-auto">{briefingPanel}</div>
+            </Panel>
+          </Group>
         </Panel>
       </Group>
 
-      {/* Row 2: Network | Briefing Preview */}
-      <Group
-        orientation="horizontal"
-        id="dashboard-row-2"
-        defaultLayout={row2Layout.defaultLayout}
-      >
-        <Panel id="network" defaultSize={50} minSize={30}>
-          {networkPanel}
-        </Panel>
-        <ResizeHandle />
-        <Panel id="briefing" defaultSize={50} minSize={30}>
-          {briefingPanel}
-        </Panel>
-      </Group>
-
-      {/* Row 3: Activity Feed (full width, not resizable) */}
-      <div>{activityPanel}</div>
+      {/* Row 3: Activity Feed (full width, capped height) */}
+      <div className="shrink-0 max-h-[160px] overflow-y-auto">{activityPanel}</div>
     </div>
   );
 }
@@ -93,12 +117,12 @@ export function ResizableDashboardGrid(props: ResizableDashboardGridProps) {
   const { agentsPanel, topicsPanel, networkPanel, briefingPanel, activityPanel } = props;
 
   return (
-    <div className="flex-1 flex flex-col">
+    <div className="flex-1 flex flex-col overflow-hidden">
       {/* Desktop: resizable panels */}
       <ResizableDesktop {...props} />
 
       {/* Mobile: simple vertical stack */}
-      <div className="lg:hidden flex flex-col">
+      <div className="lg:hidden flex flex-col overflow-y-auto">
         {agentsPanel}
         {topicsPanel}
         <div className="hidden md:block">{networkPanel}</div>

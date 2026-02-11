@@ -142,7 +142,7 @@ export default async function DashboardPage() {
   const feedItems = buildFeedItems(data);
 
   return (
-    <div className="flex flex-col min-h-[calc(100vh-40px)]">
+    <div className="flex flex-col h-[calc(100vh-40px)]">
       {/* Alert Ticker */}
       <AlertTicker items={tickerItems} />
 

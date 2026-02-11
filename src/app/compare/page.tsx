@@ -20,7 +20,7 @@ import {
   Legend,
 } from "recharts";
 
-const COLORS = ["#10b981", "#3b82f6", "#f59e0b", "#ec4899"];
+const COLORS = ["#00e5cc", "#3b82f6", "#10b981", "#ec4899"];
 
 interface AgentData {
   agent: {
@@ -141,8 +141,8 @@ function CompareContent() {
         {agentsData.map((data, i) => (
           <Card
             key={data.agent.id}
-            className="bg-zinc-900 border-zinc-800"
-            style={{ borderTopColor: COLORS[i], borderTopWidth: 3 }}
+            className="bg-zinc-900 border-zinc-800 border-t-2"
+            style={{ borderTopColor: COLORS[i] }}
           >
             <CardContent className="pt-4">
               <p className="text-sm font-bold text-zinc-100">

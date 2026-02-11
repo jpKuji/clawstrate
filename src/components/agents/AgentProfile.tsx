@@ -101,7 +101,7 @@ export function AgentProfile({
       </div>
 
       {/* Score Cards */}
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         {[
           { label: "Influence", value: agent.influenceScore, percentile: percentiles?.influence },
           { label: "Autonomy", value: agent.autonomyScore, percentile: percentiles?.autonomy },

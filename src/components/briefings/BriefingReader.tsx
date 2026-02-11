@@ -19,28 +19,17 @@ export function BriefingReader({
   narrativeId,
   skipMetrics,
 }: {
-  content: string;
+  content: string | Record<string, unknown>;
   narrativeId?: string;
   skipMetrics?: boolean;
 }) {
   const structured = isStructuredBriefing(content);
 
   if (!structured) {
-    const trimmed = content.trim();
-    if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
-      try {
-        return (
-          <pre className="font-data text-xs text-zinc-400 p-4 overflow-x-auto">
-            {JSON.stringify(JSON.parse(trimmed), null, 2)}
-          </pre>
-        );
-      } catch {
-        // fall through to markdown
-      }
-    }
+    const text = typeof content === "string" ? content : JSON.stringify(content, null, 2);
     return (
       <article className="prose prose-invert prose-zinc max-w-none prose-headings:text-zinc-100 prose-p:text-zinc-300 prose-li:text-zinc-300 prose-strong:text-zinc-200">
-        <ReactMarkdown>{content}</ReactMarkdown>
+        <ReactMarkdown>{text}</ReactMarkdown>
       </article>
     );
   }

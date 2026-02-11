@@ -215,7 +215,7 @@ export function NetworkGraph({
     const measure = () => {
       setDimensions({
         width: Math.max(320, container.clientWidth),
-        height: Math.max(440, Math.min(620, Math.round(container.clientWidth * 0.65))),
+        height: Math.max(200, container.clientHeight || Math.min(620, Math.round(container.clientWidth * 0.65))),
       });
     };
 

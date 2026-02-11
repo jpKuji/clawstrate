@@ -17,12 +17,12 @@ interface Briefing {
   generatedAt: string;
   actionsAnalyzed?: number | null;
   agentsActive?: number | null;
-  content?: string | null;
+  content?: string | Record<string, unknown> | null;
 }
 
 export function BriefingSheet({ briefing }: { briefing: Briefing | null }) {
   const [open, setOpen] = useState(false);
-  const [content, setContent] = useState<string | null>(null);
+  const [content, setContent] = useState<string | Record<string, unknown> | null>(null);
   const [loading, setLoading] = useState(false);
 
   const handleOpen = useCallback(async () => {

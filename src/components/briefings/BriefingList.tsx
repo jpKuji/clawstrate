@@ -40,7 +40,7 @@ export function BriefingList({ briefings }: { briefings: Briefing[] }) {
         return (
           <Link key={b.id} href={`/briefings/${b.id}`} className="group block">
             <div
-              className={`rounded-lg border border-zinc-800 border-l-[3px] ${colors.border} bg-zinc-900/80 ${colors.hover} p-4 md:p-5 transition-all cursor-pointer`}
+              className={`border border-zinc-800 border-l-[3px] ${colors.border} bg-zinc-900 hover:bg-zinc-900/80 p-4 md:p-5 transition-all cursor-pointer`}
             >
               <div className="flex items-start justify-between gap-4">
                 <div className="min-w-0 flex-1">

@@ -29,26 +29,38 @@ export interface StructuredBriefing {
   _validationWarnings?: string[];
 }
 
-export function isStructuredBriefing(content: string): StructuredBriefing | null {
+export function isStructuredBriefing(
+  content: string | Record<string, unknown>
+): StructuredBriefing | null {
   try {
-    let parsed = typeof content === "string" ? JSON.parse(content) : content;
-    // Handle double-encoding
-    if (typeof parsed === "string") {
-      parsed = JSON.parse(parsed);
+    // If already an object, use directly
+    let parsed: unknown = content;
+    if (typeof content === "string") {
+      parsed = JSON.parse(content);
+      // Handle double-encoding
+      if (typeof parsed === "string") {
+        parsed = JSON.parse(parsed);
+      }
     }
-    if (parsed && typeof parsed === "object" && Array.isArray(parsed.sections)) {
+    if (
+      parsed &&
+      typeof parsed === "object" &&
+      !Array.isArray(parsed) &&
+      Array.isArray((parsed as any).sections)
+    ) {
       return parsed as StructuredBriefing;
     }
   } catch {
-    // Try trimming BOM/whitespace
-    try {
-      const trimmed = (content as string).replace(/^\uFEFF/, "").trim();
-      let parsed = JSON.parse(trimmed);
-      if (typeof parsed === "string") parsed = JSON.parse(parsed);
-      if (parsed?.sections && Array.isArray(parsed.sections)) {
-        return parsed as StructuredBriefing;
-      }
-    } catch { /* not JSON */ }
+    if (typeof content === "string") {
+      try {
+        const trimmed = content.replace(/^\uFEFF/, "").trim();
+        let parsed: unknown = JSON.parse(trimmed);
+        if (typeof parsed === "string") parsed = JSON.parse(parsed);
+        if (parsed && typeof parsed === "object" && Array.isArray((parsed as any).sections)) {
+          return parsed as StructuredBriefing;
+        }
+      } catch { /* not JSON */ }
+    }
   }
   return null;
 }

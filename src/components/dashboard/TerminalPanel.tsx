@@ -25,7 +25,7 @@ export function TerminalPanel({
   infoTooltip?: string;
 }) {
   return (
-    <div className={`border border-zinc-800 flex flex-col ${className ?? ""}`}>
+    <div className={`border border-zinc-800 flex flex-col h-full overflow-hidden ${className ?? ""}`}>
       <div className="flex items-center justify-between bg-zinc-900 px-3 py-1.5">
         <div className="flex items-center gap-1.5">
           <span className="text-[11px] font-semibold uppercase tracking-widest text-accent">
@@ -60,7 +60,7 @@ export function TerminalPanel({
           <p className="text-[10px] text-zinc-500">{description}</p>
         </div>
       )}
-      <div className="flex-1 bg-[var(--panel-bg)]">{children}</div>
+      <div className="flex-1 bg-[var(--panel-bg)] overflow-y-auto">{children}</div>
     </div>
   );
 }

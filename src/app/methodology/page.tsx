@@ -18,8 +18,8 @@ export default function MethodologyPage() {
       description={GLOBAL_METHODOLOGY_CONFIG.description}
     >
       <div className="space-y-10">
-        <section className="prose prose-invert prose-zinc max-w-none">
-          <p>{GLOBAL_METHODOLOGY_CONFIG.intro}</p>
+        <section className="max-w-none">
+          <p className="text-sm text-zinc-400 leading-relaxed">{GLOBAL_METHODOLOGY_CONFIG.intro}</p>
         </section>
 
         <section className="space-y-4">
@@ -65,7 +65,7 @@ export default function MethodologyPage() {
           <h2 className="text-xl font-semibold text-zinc-100">Scores &amp; Metrics</h2>
           <div className="space-y-3">
             {GLOBAL_METHODOLOGY_CONFIG.scoreMetrics.map((metric) => (
-              <div key={metric.name} className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-4">
+              <div key={metric.name} className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
                 <h3 className="text-sm font-semibold text-zinc-100">{metric.name}</h3>
                 <p className="text-sm text-zinc-400 mt-1">{metric.description}</p>
                 {metric.formula && (
@@ -123,7 +123,7 @@ export default function MethodologyPage() {
             <BulletCard title="Temporal Patterns" items={GLOBAL_METHODOLOGY_CONFIG.temporalPatternDescriptions} />
             <BulletCard title="Topic Metrics" items={GLOBAL_METHODOLOGY_CONFIG.topicMetricDescriptions} />
             <BulletCard title="Briefings" items={GLOBAL_METHODOLOGY_CONFIG.briefingDescriptions} />
-            <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-4">
+            <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
               <h3 className="text-sm font-semibold text-zinc-100 mb-2">Network Graph</h3>
               <p className="text-sm text-zinc-400">{GLOBAL_METHODOLOGY_CONFIG.networkGraphDescription}</p>
             </div>
@@ -153,7 +153,7 @@ export function MethodologySourcesSection({
 }) {
   if (sources.length === 0) {
     return (
-      <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-4">
+      <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
         <p className="text-sm text-zinc-400">
           No enabled source adapters are currently configured. Global methodology remains active, but no per-source coverage is available yet.
         </p>
@@ -173,7 +173,7 @@ export function MethodologySourcesSection({
 
       {sources.map((source) => (
         <TabsContent key={source.id} value={source.id} className="mt-4 space-y-4">
-          <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-4">
+          <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
             <div className="flex items-center gap-2 mb-2">
               <h3 className="text-base font-semibold text-zinc-100">{source.displayName}</h3>
               <Badge variant="outline" className="border-zinc-700 text-zinc-300">
@@ -185,11 +185,11 @@ export function MethodologySourcesSection({
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <BulletCard title="Ingestion Behavior" items={source.ingestionBehavior} />
-            <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-4">
+            <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
               <h4 className="text-sm font-semibold text-zinc-100 mb-2">Identity Model</h4>
               <p className="text-sm text-zinc-400">{source.identityModel}</p>
             </div>
-            <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-4 lg:col-span-2">
+            <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-4 lg:col-span-2">
               <h4 className="text-sm font-semibold text-zinc-100 mb-3">Source-Specific Metrics</h4>
               <MethodologyTable
                 headers={["Metric", "Value"]}
@@ -212,7 +212,7 @@ function BulletCard({
   items: string[];
 }) {
   return (
-    <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-4">
+    <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
       <h3 className="text-sm font-semibold text-zinc-100 mb-2">{title}</h3>
       <ul className="space-y-1 text-sm text-zinc-400">
         {items.map((item) => (
@@ -231,7 +231,7 @@ function MethodologyTable({
   rows: string[][];
 }) {
   return (
-    <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 overflow-hidden">
+    <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 overflow-hidden">
       <table className="w-full text-sm">
         <thead className="bg-zinc-900/70">
           <tr className="border-b border-zinc-800">

@@ -33,18 +33,18 @@ export function NetworkMiniMap({
 
   if (finalNodes.length === 0 || filteredEdges.length === 0) {
     return (
-      <div className="flex items-center justify-center h-full min-h-[300px] text-[11px] text-zinc-600">
+      <div className="flex items-center justify-center h-full text-[11px] text-zinc-600">
         No network data available
       </div>
     );
   }
 
   return (
-    <div className="h-full min-h-[300px] overflow-hidden [&_canvas]:!rounded-none [&_.space-y-4]:!space-y-0 [&>div>div:first-child]:hidden [&>div>div:last-child]:hidden [&_aside]:hidden">
+    <div className="h-full overflow-hidden [&_canvas]:!rounded-none [&_.space-y-4]:!space-y-0 [&>div>div:first-child]:hidden [&>div>div:last-child]:hidden [&_aside]:hidden [&_.grid]:!grid-cols-1">
       <NetworkGraph
         nodes={finalNodes}
         edges={filteredEdges}
-        colorMode="auto"
+        colorMode="agentType"
       />
     </div>
   );
