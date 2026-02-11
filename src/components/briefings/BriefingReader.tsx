@@ -1,65 +1,31 @@
 "use client";
 
 import ReactMarkdown from "react-markdown";
-import Link from "next/link";
-import { useState } from "react";
+import { useMemo } from "react";
+import { useScrollSpy } from "@/hooks/useScrollSpy";
+import { AlertBanner } from "@/components/briefings/AlertBanner";
+import { MetricStrip } from "@/components/briefings/MetricStrip";
+import { CitationChip } from "@/components/briefings/CitationChip";
+import { MobileSectionNav } from "@/components/briefings/MobileSectionNav";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-
-interface BriefingSection {
-  title: string;
-  content: string;
-  citations?: Array<{
-    type: "agent" | "topic" | "action";
-    id?: string;
-    agentId?: string;
-    label?: string;
-    slug?: string;
-    context?: string;
-  }>;
-}
-
-interface BriefingMetric {
-  label: string;
-  value: string;
-  change?: string;
-}
-
-interface BriefingAlert {
-  level: "info" | "warning" | "critical";
-  message: string;
-}
-
-interface StructuredBriefing {
-  sections: BriefingSection[];
-  metrics?: Record<string, BriefingMetric>;
-  alerts?: BriefingAlert[];
-  _validationWarnings?: string[];
-}
-
-function isStructuredBriefing(content: string): StructuredBriefing | null {
-  try {
-    const parsed = JSON.parse(content);
-    if (parsed.sections && Array.isArray(parsed.sections)) {
-      return parsed;
-    }
-  } catch {
-    // Not JSON — it's a legacy markdown briefing
-  }
-  return null;
-}
+import type {
+  StructuredBriefing,
+  BriefingSection,
+} from "@/lib/briefing-parser";
+import { isStructuredBriefing } from "@/lib/briefing-parser";
 
 export function BriefingReader({
   content,
   narrativeId,
+  skipMetrics,
 }: {
   content: string;
   narrativeId?: string;
+  skipMetrics?: boolean;
 }) {
   const structured = isStructuredBriefing(content);
 
   if (!structured) {
-    // Legacy markdown briefing — render as before
     return (
       <article className="prose prose-invert prose-zinc max-w-none prose-headings:text-zinc-100 prose-p:text-zinc-300 prose-li:text-zinc-300 prose-strong:text-zinc-200">
         <ReactMarkdown>{content}</ReactMarkdown>
@@ -67,173 +33,211 @@ export function BriefingReader({
     );
   }
 
-  return <StructuredBriefingView briefing={structured} narrativeId={narrativeId} />;
+  return (
+    <StructuredBriefingView
+      briefing={structured}
+      narrativeId={narrativeId}
+      skipMetrics={skipMetrics}
+    />
+  );
 }
 
 function StructuredBriefingView({
   briefing,
   narrativeId,
+  skipMetrics,
 }: {
   briefing: StructuredBriefing;
   narrativeId?: string;
+  skipMetrics?: boolean;
 }) {
-  const trackEvent = (eventType: string, metadata?: Record<string, unknown>) => {
+  const sectionIds = useMemo(
+    () => briefing.sections.map((_, i) => `section-${i}`),
+    [briefing.sections]
+  );
+
+  const activeId = useScrollSpy(sectionIds);
+
+  const sectionNav = useMemo(
+    () =>
+      briefing.sections.map((s, i) => ({
+        id: `section-${i}`,
+        title: s.title,
+      })),
+    [briefing.sections]
+  );
+
+  const trackEvent = (
+    eventType: string,
+    metadata?: Record<string, unknown>
+  ) => {
     void fetch("/api/v1/telemetry", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        eventType,
-        narrativeId,
-        metadata,
-      }),
+      body: JSON.stringify({ eventType, narrativeId, metadata }),
     });
   };
 
+  // Sort alerts: critical first, then warning, then info
+  const sortedAlerts = useMemo(() => {
+    if (!briefing.alerts) return [];
+    const order = { critical: 0, warning: 1, info: 2 };
+    return [...briefing.alerts].sort(
+      (a, b) => (order[a.level] ?? 3) - (order[b.level] ?? 3)
+    );
+  }, [briefing.alerts]);
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
       {/* Alerts */}
-      {briefing.alerts && briefing.alerts.length > 0 && (
+      {sortedAlerts.length > 0 && (
         <div className="space-y-2">
-          {briefing.alerts.map((alert, i) => (
-            <div
+          {sortedAlerts.map((alert, i) => (
+            <AlertBanner
               key={i}
-              role="button"
-              tabIndex={0}
-              className={`rounded-lg border p-3 text-sm ${
-                alert.level === "critical"
-                  ? "border-red-800 bg-red-950/50 text-red-300"
-                  : alert.level === "warning"
-                    ? "border-amber-800 bg-amber-950/50 text-amber-300"
-                    : "border-blue-800 bg-blue-950/50 text-blue-300"
-              }`}
-              onClick={() =>
+              level={alert.level}
+              message={alert.message}
+              onInteract={() =>
                 trackEvent("alert_interaction", {
                   level: alert.level,
                   message: alert.message,
                 })
               }
-            >
-              {alert.message}
-            </div>
+            />
           ))}
         </div>
       )}
 
-      {/* Inline Metrics */}
-      {briefing.metrics && Object.keys(briefing.metrics).length > 0 && (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          {Object.values(briefing.metrics).map((metric, i) => (
-            <Card key={i} className="bg-zinc-900 border-zinc-800">
-              <CardContent className="pt-3 pb-3">
-                <p className="text-xs text-zinc-500">{metric.label}</p>
-                <p className="text-lg font-bold text-zinc-100">{metric.value}</p>
-                {metric.change && (
-                  <p className={`text-xs mt-0.5 ${
-                    metric.change.startsWith("+") ? "text-emerald-400" :
-                    metric.change.startsWith("-") ? "text-red-400" : "text-zinc-400"
-                  }`}>
-                    {metric.change}
-                  </p>
-                )}
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      )}
+      {/* Metrics (skip if already rendered at page level) */}
+      {!skipMetrics &&
+        briefing.metrics &&
+        Object.keys(briefing.metrics).length > 0 && (
+          <MetricStrip metrics={briefing.metrics} />
+        )}
 
-      {/* Sections */}
-      {briefing.sections.map((section, i) => (
-        <CollapsibleSection key={i} section={section} defaultOpen={i < 3} />
-      ))}
-
-      {/* Validation Warnings (Phase 4.5) */}
-      {briefing._validationWarnings && briefing._validationWarnings.length > 0 && (
-        <Card className="bg-zinc-900 border-amber-800/50">
-          <CardHeader>
-            <CardTitle className="text-xs text-amber-400">
-              Validation Notes
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <ul className="space-y-1">
-              {briefing._validationWarnings.map((warning, i) => (
-                <li key={i} className="text-xs text-amber-300/70">
-                  {warning}
-                </li>
+      {/* Sidebar TOC + Sections layout */}
+      <div className="lg:grid lg:grid-cols-[220px_1fr] lg:gap-8">
+        {/* Desktop sidebar */}
+        <aside className="hidden lg:block">
+          <nav className="sticky top-20">
+            <p className="text-[10px] font-semibold uppercase tracking-widest text-zinc-500 mb-3">
+              Sections
+            </p>
+            <div className="space-y-0.5">
+              {sectionNav.map((section) => (
+                <a
+                  key={section.id}
+                  href={`#${section.id}`}
+                  className={`block border-l-2 py-1.5 pl-3 text-sm transition-colors ${
+                    activeId === section.id
+                      ? "border-emerald-500 text-zinc-100"
+                      : "border-transparent text-zinc-500 hover:text-zinc-300 hover:border-zinc-700"
+                  }`}
+                >
+                  {section.title}
+                </a>
               ))}
-            </ul>
-          </CardContent>
-        </Card>
-      )}
+            </div>
+          </nav>
+        </aside>
+
+        {/* Sections */}
+        <div className="space-y-0">
+          {briefing.sections.map((section, i) => (
+            <SectionBlock
+              key={i}
+              section={section}
+              index={i}
+              isFirst={i === 0}
+            />
+          ))}
+        </div>
+      </div>
+
+      {/* Validation Warnings */}
+      {briefing._validationWarnings &&
+        briefing._validationWarnings.length > 0 && (
+          <Card className="bg-zinc-900 border-amber-800/50">
+            <CardHeader>
+              <CardTitle className="text-xs text-amber-400">
+                Validation Notes
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <ul className="space-y-1">
+                {briefing._validationWarnings.map((warning, i) => (
+                  <li key={i} className="text-xs text-amber-300/70">
+                    {warning}
+                  </li>
+                ))}
+              </ul>
+            </CardContent>
+          </Card>
+        )}
+
+      {/* Mobile section nav */}
+      <MobileSectionNav sections={sectionNav} activeId={activeId} />
     </div>
   );
 }
 
-function CollapsibleSection({
+function SectionBlock({
   section,
-  defaultOpen,
+  index,
+  isFirst,
 }: {
   section: BriefingSection;
-  defaultOpen: boolean;
+  index: number;
+  isFirst: boolean;
 }) {
-  const [isOpen, setIsOpen] = useState(defaultOpen);
+  const num = String(index + 1).padStart(2, "0");
 
   return (
-    <Card className="bg-zinc-900 border-zinc-800">
-      <CardHeader
-        className="cursor-pointer select-none"
-        onClick={() => setIsOpen(!isOpen)}
-      >
-        <CardTitle className="text-sm text-zinc-200 flex items-center justify-between">
-          {section.title}
-          <span className="text-zinc-500 text-xs">{isOpen ? "▾" : "▸"}</span>
-        </CardTitle>
-      </CardHeader>
-      {isOpen && (
-        <CardContent>
-          <article className="prose prose-invert prose-zinc max-w-none prose-sm prose-headings:text-zinc-100 prose-p:text-zinc-300 prose-li:text-zinc-300 prose-strong:text-zinc-200">
-            <ReactMarkdown>{section.content}</ReactMarkdown>
-          </article>
-
-          {/* Citations */}
-          {section.citations && section.citations.length > 0 && (
-            <div className="flex flex-wrap gap-2 mt-4 pt-3 border-t border-zinc-800">
-              {section.citations.map((citation, j) => {
-                const href =
-                  citation.type === "agent"
-                    ? `/agents/${encodeURIComponent(citation.agentId || citation.id || "")}`
-                    : citation.type === "topic"
-                      ? `/topics/${encodeURIComponent(citation.slug || "")}`
-                      : null;
-
-                return (
-                  <Badge
-                    key={j}
-                    variant="outline"
-                    className={`text-xs cursor-pointer ${
-                      citation.type === "agent"
-                        ? "border-emerald-800 text-emerald-400 hover:bg-emerald-950"
-                        : citation.type === "topic"
-                          ? "border-blue-800 text-blue-400 hover:bg-blue-950"
-                          : "border-zinc-700 text-zinc-400"
-                    }`}
-                  >
-                    {href ? (
-                      <Link href={href}>
-                        {citation.type === "agent"
-                          ? `@${citation.label || citation.id || citation.agentId}`
-                          : `#${citation.slug}`}
-                      </Link>
-                    ) : (
-                      <span>{citation.label || citation.id || citation.slug}</span>
-                    )}
-                  </Badge>
-                );
-              })}
-            </div>
-          )}
-        </CardContent>
+    <div id={`section-${index}`} className="scroll-mt-20">
+      {/* Numbered gradient divider */}
+      {!isFirst && (
+        <div className="flex items-center gap-4 py-8">
+          <div className="h-px flex-1 bg-gradient-to-r from-zinc-800 to-transparent" />
+          <span className="text-xs font-mono text-zinc-600 shrink-0">
+            {num}
+          </span>
+          <div className="h-px flex-1 bg-gradient-to-l from-zinc-800 to-transparent" />
+        </div>
       )}
-    </Card>
+
+      {/* Section title */}
+      <h2 className="text-xl md:text-2xl font-bold text-zinc-100 mb-4">
+        {isFirst && (
+          <span className="text-xs font-mono text-zinc-600 mr-3">{num}</span>
+        )}
+        {section.title}
+      </h2>
+
+      {/* Prose content */}
+      <article className="prose prose-invert prose-zinc max-w-none text-[15px] leading-relaxed prose-headings:text-zinc-100 prose-p:text-zinc-300 prose-li:text-zinc-300 prose-strong:text-zinc-200 prose-blockquote:border-l-emerald-500/40 prose-a:text-emerald-400 prose-a:no-underline hover:prose-a:underline prose-code:text-zinc-300 prose-code:bg-zinc-800/60 prose-code:rounded prose-code:px-1.5 prose-code:py-0.5 prose-pre:bg-zinc-900 prose-pre:border prose-pre:border-zinc-800">
+        <ReactMarkdown>{section.content}</ReactMarkdown>
+      </article>
+
+      {/* Citations */}
+      {section.citations && section.citations.length > 0 && (
+        <div className="mt-5 pt-4 border-t border-zinc-800/50">
+          <p className="text-[10px] font-semibold uppercase tracking-widest text-zinc-500 mb-2">
+            References
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {section.citations.map((citation, j) => (
+              <CitationChip
+                key={j}
+                type={citation.type}
+                id={citation.id}
+                agentId={citation.agentId}
+                label={citation.label}
+                slug={citation.slug}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
   );
 }

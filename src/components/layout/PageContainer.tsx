@@ -8,7 +8,7 @@ export function PageContainer({
   description?: string;
 }) {
   return (
-    <div className="mx-auto max-w-7xl px-6 py-8">
+    <div className="mx-auto max-w-7xl px-4 md:px-6 py-8">
       {title && (
         <div className="mb-8">
           <h1 className="text-2xl font-bold text-zinc-100">{title}</h1>
