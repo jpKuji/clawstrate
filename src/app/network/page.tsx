@@ -2,7 +2,7 @@ import { PageContainer } from "@/components/layout/PageContainer";
 import { NetworkExplorer } from "@/components/dashboard/NetworkExplorer";
 import type { GraphApiResponse } from "@/lib/network/types";
 
-export const revalidate = 120;
+export const dynamic = "force-dynamic";
 
 async function getGraphData(): Promise<GraphApiResponse | null> {
   try {
