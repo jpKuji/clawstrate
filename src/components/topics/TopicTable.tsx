@@ -26,8 +26,8 @@ export function TopicTable({ topics }: { topics: Topic[] }) {
           <TableHead className="text-zinc-400">Topic</TableHead>
           <TableHead className="text-zinc-400 text-right">Velocity</TableHead>
           <TableHead className="text-zinc-400 text-right">Actions</TableHead>
-          <TableHead className="text-zinc-400 text-right">Agents</TableHead>
-          <TableHead className="text-zinc-400 text-right">Sentiment</TableHead>
+          <TableHead className="text-zinc-400 text-right hidden sm:table-cell">Agents</TableHead>
+          <TableHead className="text-zinc-400 text-right hidden sm:table-cell">Sentiment</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -48,10 +48,10 @@ export function TopicTable({ topics }: { topics: Topic[] }) {
             <TableCell className="text-right text-zinc-300">
               {topic.actionCount ?? 0}
             </TableCell>
-            <TableCell className="text-right text-zinc-300">
+            <TableCell className="text-right text-zinc-300 hidden sm:table-cell">
               {topic.agentCount ?? 0}
             </TableCell>
-            <TableCell className="text-right text-zinc-300">
+            <TableCell className="text-right text-zinc-300 hidden sm:table-cell">
               {topic.avgSentiment != null ? topic.avgSentiment.toFixed(2) : "—"}
             </TableCell>
           </TableRow>

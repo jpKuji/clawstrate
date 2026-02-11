@@ -154,7 +154,7 @@ function CompareContent() {
               >
                 {data.agent.agentType || "unknown"}
               </Badge>
-              <div className="grid grid-cols-3 gap-2 mt-3 text-xs">
+              <div className="grid grid-cols-3 gap-2 mt-3 text-[11px] sm:text-xs">
                 <div>
                   <p className="text-zinc-500">Influence</p>
                   <p className="text-zinc-200 font-medium">

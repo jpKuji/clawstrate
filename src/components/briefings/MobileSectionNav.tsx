@@ -17,7 +17,7 @@ export function MobileSectionNav({ sections, activeId }: MobileSectionNavProps) 
     <div className="lg:hidden fixed bottom-6 right-6 z-50">
       {/* Popover */}
       {isOpen && (
-        <div className="absolute bottom-14 right-0 w-64 rounded-xl border border-zinc-800 bg-zinc-950/95 backdrop-blur-sm p-3 shadow-xl">
+        <div className="absolute bottom-14 right-0 w-[calc(100vw-4rem)] sm:w-64 max-h-[60vh] overflow-y-auto rounded-xl border border-zinc-800 bg-zinc-950/95 backdrop-blur-sm p-3 shadow-xl">
           <p className="text-[10px] font-semibold uppercase tracking-widest text-zinc-500 mb-2 px-2">
             Sections
           </p>

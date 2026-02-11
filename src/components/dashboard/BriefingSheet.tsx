@@ -61,7 +61,7 @@ export function BriefingSheet({ briefing }: { briefing: Briefing | null }) {
       <Sheet open={open} onOpenChange={setOpen}>
         <SheetContent
           side="right"
-          className="w-full max-w-2xl sm:max-w-2xl overflow-y-auto bg-zinc-950 border-zinc-800"
+          className="w-[95vw] sm:w-full sm:max-w-2xl overflow-y-auto bg-zinc-950 border-zinc-800"
         >
           <SheetHeader>
             <SheetTitle className="text-zinc-100">
@@ -76,7 +76,7 @@ export function BriefingSheet({ briefing }: { briefing: Briefing | null }) {
                 <div className="h-4 w-5/6 bg-zinc-800 rounded animate-pulse" />
               </div>
             ) : content ? (
-              <BriefingReader content={content} narrativeId={briefing?.id} />
+              <BriefingReader content={content} narrativeId={briefing?.id} inDrawer />
             ) : (
               <p className="text-sm text-zinc-500 py-8">
                 Unable to load briefing content.

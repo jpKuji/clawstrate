@@ -18,10 +18,12 @@ export function BriefingReader({
   content,
   narrativeId,
   skipMetrics,
+  inDrawer,
 }: {
   content: string | Record<string, unknown>;
   narrativeId?: string;
   skipMetrics?: boolean;
+  inDrawer?: boolean;
 }) {
   const structured = isStructuredBriefing(content);
 
@@ -39,6 +41,7 @@ export function BriefingReader({
       briefing={structured}
       narrativeId={narrativeId}
       skipMetrics={skipMetrics}
+      inDrawer={inDrawer}
     />
   );
 }
@@ -47,10 +50,12 @@ function StructuredBriefingView({
   briefing,
   narrativeId,
   skipMetrics,
+  inDrawer,
 }: {
   briefing: StructuredBriefing;
   narrativeId?: string;
   skipMetrics?: boolean;
+  inDrawer?: boolean;
 }) {
   const sectionIds = useMemo(
     () => briefing.sections.map((_, i) => `section-${i}`),
@@ -113,36 +118,30 @@ function StructuredBriefingView({
       {!skipMetrics &&
         briefing.metrics &&
         Object.keys(briefing.metrics).length > 0 && (
-          <MetricStrip metrics={briefing.metrics} />
+          <MetricStrip metrics={briefing.metrics} compact={inDrawer} />
         )}
 
-      {/* Sidebar TOC + Sections layout */}
-      <div className="lg:grid lg:grid-cols-[220px_1fr] lg:gap-8">
-        {/* Desktop sidebar */}
-        <aside className="hidden lg:block">
-          <nav className="sticky top-20">
-            <p className="text-[10px] font-semibold uppercase tracking-widest text-zinc-500 mb-3">
-              Sections
-            </p>
-            <div className="space-y-0.5">
-              {sectionNav.map((section) => (
-                <a
-                  key={section.id}
-                  href={`#${section.id}`}
-                  className={`block border-l-2 py-1.5 pl-3 text-sm transition-colors ${
-                    activeId === section.id
-                      ? "border-[var(--accent-cyan)] text-zinc-100"
-                      : "border-transparent text-zinc-500 hover:text-zinc-300 hover:border-zinc-700"
-                  }`}
-                >
-                  {section.title}
-                </a>
-              ))}
-            </div>
-          </nav>
-        </aside>
+      {/* Compact inline section nav for drawer mode */}
+      {inDrawer && sectionNav.length > 1 && (
+        <div className="flex gap-1.5 overflow-x-auto pb-2 scrollbar-none">
+          {sectionNav.map((section) => (
+            <a
+              key={section.id}
+              href={`#${section.id}`}
+              className={`shrink-0 rounded-full px-3 py-1 text-xs border transition-colors ${
+                activeId === section.id
+                  ? "border-[var(--accent-cyan)]/60 bg-zinc-800 text-zinc-100"
+                  : "border-zinc-800 text-zinc-500 hover:text-zinc-300 hover:border-zinc-700"
+              }`}
+            >
+              {section.title}
+            </a>
+          ))}
+        </div>
+      )}
 
-        {/* Sections */}
+      {/* Sidebar TOC + Sections layout */}
+      {inDrawer ? (
         <div className="space-y-0">
           {briefing.sections.map((section, i) => (
             <SectionBlock
@@ -153,7 +152,45 @@ function StructuredBriefingView({
             />
           ))}
         </div>
-      </div>
+      ) : (
+        <div className="lg:grid lg:grid-cols-[220px_1fr] lg:gap-8">
+          {/* Desktop sidebar */}
+          <aside className="hidden lg:block">
+            <nav className="sticky top-20">
+              <p className="text-[10px] font-semibold uppercase tracking-widest text-zinc-500 mb-3">
+                Sections
+              </p>
+              <div className="space-y-0.5">
+                {sectionNav.map((section) => (
+                  <a
+                    key={section.id}
+                    href={`#${section.id}`}
+                    className={`block border-l-2 py-1.5 pl-3 text-sm transition-colors ${
+                      activeId === section.id
+                        ? "border-[var(--accent-cyan)] text-zinc-100"
+                        : "border-transparent text-zinc-500 hover:text-zinc-300 hover:border-zinc-700"
+                    }`}
+                  >
+                    {section.title}
+                  </a>
+                ))}
+              </div>
+            </nav>
+          </aside>
+
+          {/* Sections */}
+          <div className="space-y-0">
+            {briefing.sections.map((section, i) => (
+              <SectionBlock
+                key={i}
+                section={section}
+                index={i}
+                isFirst={i === 0}
+              />
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Validation Warnings */}
       {briefing._validationWarnings &&
@@ -176,8 +213,8 @@ function StructuredBriefingView({
           </Card>
         )}
 
-      {/* Mobile section nav */}
-      <MobileSectionNav sections={sectionNav} activeId={activeId} />
+      {/* Mobile section nav (hidden in drawer — uses inline nav instead) */}
+      {!inDrawer && <MobileSectionNav sections={sectionNav} activeId={activeId} />}
     </div>
   );
 }

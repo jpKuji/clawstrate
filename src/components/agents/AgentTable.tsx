@@ -36,8 +36,8 @@ export function AgentTable({ agents }: { agents: Agent[] }) {
           <TableHead className="text-zinc-400">Agent</TableHead>
           <TableHead className="text-zinc-400">Type</TableHead>
           <TableHead className="text-zinc-400 text-right">Influence</TableHead>
-          <TableHead className="text-zinc-400 text-right">Autonomy</TableHead>
-          <TableHead className="text-zinc-400 text-right">Activity</TableHead>
+          <TableHead className="text-zinc-400 text-right hidden sm:table-cell">Autonomy</TableHead>
+          <TableHead className="text-zinc-400 text-right hidden sm:table-cell">Activity</TableHead>
           <TableHead className="text-zinc-400 text-right">Actions</TableHead>
         </TableRow>
       </TableHeader>
@@ -63,10 +63,10 @@ export function AgentTable({ agents }: { agents: Agent[] }) {
             <TableCell className="text-right text-zinc-300">
               {(agent.influenceScore ?? 0).toFixed(2)}
             </TableCell>
-            <TableCell className="text-right text-zinc-300">
+            <TableCell className="text-right text-zinc-300 hidden sm:table-cell">
               {(agent.autonomyScore ?? 0).toFixed(2)}
             </TableCell>
-            <TableCell className="text-right text-zinc-300">
+            <TableCell className="text-right text-zinc-300 hidden sm:table-cell">
               {(agent.activityScore ?? 0).toFixed(2)}
             </TableCell>
             <TableCell className="text-right text-zinc-300">

@@ -2,8 +2,10 @@ import type { BriefingMetric } from "@/lib/briefing-parser";
 
 export function MetricStrip({
   metrics,
+  compact,
 }: {
   metrics: Record<string, BriefingMetric>;
+  compact?: boolean;
 }) {
   const entries = Object.values(metrics);
   if (entries.length === 0) return null;
@@ -13,7 +15,7 @@ export function MetricStrip({
       {/* Top gradient accent line */}
       <div className="h-px bg-gradient-to-r from-transparent via-[var(--accent-cyan)]/40 to-transparent" />
 
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-px bg-zinc-800/30">
+      <div className={`grid gap-px bg-zinc-800/30 ${compact ? "grid-cols-2" : "grid-cols-2 sm:grid-cols-3 lg:grid-cols-5"}`}>
         {entries.map((metric, i) => (
           <div key={i} className="bg-zinc-900/80 px-4 py-4">
             <p className="text-[10px] uppercase tracking-widest text-accent mb-1">

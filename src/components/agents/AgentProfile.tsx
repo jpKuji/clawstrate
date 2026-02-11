@@ -128,7 +128,7 @@ export function AgentProfile({
           <CardTitle className="text-[11px] uppercase tracking-widest text-accent">Behavioral Fingerprint</CardTitle>
         </CardHeader>
         <CardContent className="flex justify-center">
-          <ResponsiveContainer width={300} height={250}>
+          <ResponsiveContainer width="100%" height={250}>
             <RadarChart data={radarData}>
               <PolarGrid stroke="#3f3f46" />
               <PolarAngleAxis dataKey="metric" tick={{ fill: "#a1a1aa", fontSize: 12 }} />
@@ -146,7 +146,7 @@ export function AgentProfile({
 
       {/* Ego Graph — Interaction Partners */}
       {egoGraph && (egoGraph.outgoing.length > 0 || egoGraph.incoming.length > 0) && (
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           {egoGraph.outgoing.length > 0 && (
             <Card className="bg-zinc-900 border-zinc-800">
               <CardHeader>

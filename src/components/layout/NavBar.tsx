@@ -55,7 +55,7 @@ export function NavBar() {
 
         {/* Mobile hamburger */}
         <button
-          className="md:hidden p-1.5 text-zinc-400 hover:text-zinc-100 transition-colors"
+          className="md:hidden p-2 text-zinc-400 hover:text-zinc-100 transition-colors"
           onClick={() => setMobileOpen(!mobileOpen)}
           aria-label={mobileOpen ? "Close menu" : "Open menu"}
         >
