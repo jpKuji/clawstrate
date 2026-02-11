@@ -10,7 +10,7 @@ import { generateBriefing } from "@/lib/pipeline/briefing";
 import { acquireLock, invalidateApiCaches } from "@/lib/redis";
 import { and, eq } from "drizzle-orm";
 
-export const maxDuration = 900;
+export const maxDuration = 300;
 
 type StageName =
   | "ingest"
