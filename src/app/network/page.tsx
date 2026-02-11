@@ -1,16 +1,21 @@
 import { PageContainer } from "@/components/layout/PageContainer";
-import { NetworkGraph } from "@/components/dashboard/NetworkGraph";
+import { NetworkExplorer } from "@/components/dashboard/NetworkExplorer";
+import type { GraphApiResponse } from "@/lib/network/types";
 
 export const revalidate = 120;
 
-async function getGraphData() {
+async function getGraphData(): Promise<GraphApiResponse | null> {
   try {
     const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:3000";
-    const res = await fetch(`${baseUrl}/api/v1/graph`, {
-      next: { revalidate: 120 },
-    });
-    if (!res.ok) return null;
-    return res.json();
+    const response = await fetch(
+      `${baseUrl}/api/v1/graph?source=all&windowDays=30&maxNodes=50`,
+      {
+        next: { revalidate: 120 },
+      }
+    );
+
+    if (!response.ok) return null;
+    return (await response.json()) as GraphApiResponse;
   } catch {
     return null;
   }
@@ -22,12 +27,9 @@ export default async function NetworkPage() {
   return (
     <PageContainer
       title="Network Graph"
-      description="Agent interaction network — nodes sized by influence, colored by type"
+      description="Interactive agent interaction map with source, window, and segmentation controls"
     >
-      <NetworkGraph
-        nodes={data?.nodes ?? []}
-        edges={data?.edges ?? []}
-      />
+      <NetworkExplorer initialData={data} />
     </PageContainer>
   );
 }
