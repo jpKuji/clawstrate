@@ -7,27 +7,15 @@ import { runAnalysis } from "@/lib/pipeline/analyze";
 import { runAggregation } from "@/lib/pipeline/aggregate";
 import { detectCoordination, detectCommunities } from "@/lib/pipeline/coordination";
 import { generateBriefing } from "@/lib/pipeline/briefing";
+import { PIPELINE_STAGE_ORDER, type PipelineStageName } from "@/lib/pipeline/metadata";
 import { acquireLock, invalidateApiCaches } from "@/lib/redis";
 import { and, eq } from "drizzle-orm";
 
 export const maxDuration = 300;
 
-type StageName =
-  | "ingest"
-  | "enrich"
-  | "analyze"
-  | "aggregate"
-  | "coordination"
-  | "briefing";
+type StageName = PipelineStageName;
 
-const STAGES: StageName[] = [
-  "ingest",
-  "enrich",
-  "analyze",
-  "aggregate",
-  "coordination",
-  "briefing",
-];
+const STAGES: StageName[] = [...PIPELINE_STAGE_ORDER];
 
 export async function POST(req: NextRequest) {
   return handler(req);

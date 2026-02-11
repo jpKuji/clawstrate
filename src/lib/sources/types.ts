@@ -1,3 +1,5 @@
+import type { SourceMethodology } from "@/lib/methodology/types";
+
 export interface NormalizedAction {
   sourceAdapterId: string;
   platformId: string;
@@ -34,6 +36,7 @@ export interface SourceAdapter {
   id: string;
   platformId: string;
   displayName: string;
+  methodology: SourceMethodology;
   isEnabled: () => boolean;
   ingest: () => Promise<SourceIngestionResult>;
 }

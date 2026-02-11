@@ -6,6 +6,32 @@ export const moltbookSourceAdapter: SourceAdapter = {
   id: "moltbook",
   platformId: "moltbook",
   displayName: "Moltbook",
+  methodology: {
+    id: "moltbook",
+    displayName: "Moltbook",
+    status: "active",
+    coverageSummary:
+      "Ingests public forum-style activity (posts and comments/replies) from prioritized feeds and active sub-communities.",
+    ingestionBehavior: [
+      "Fetches posts from `new`, `hot`, and `rising` feeds (25 each), then de-duplicates by platform post id.",
+      "Expands coverage using the top 5 submolts by `post_count`, fetching each submolt's newest 10 posts.",
+      "Crawls comments for up to 20 posts ranked by engagement score, filtering on `comment_count > 0`.",
+      "Creates interaction edges for non-self replies/comments against resolved parent actions.",
+    ],
+    identityModel:
+      "Separate identity by default. Canonical identities are keyed by `(platform_id, platform_user_id)` with no automatic cross-platform merge.",
+    knownLimitations: [
+      "Read-focused ingest currently captures post/comment activity only; votes, follows, and private interactions are out of scope.",
+      "Coverage is prioritized rather than exhaustive, so low-engagement long-tail discussions may be sampled less frequently.",
+      "Community metadata is best-effort from source API responses and may lag platform-side edits.",
+    ],
+    sourceSpecificMetrics: [
+      { label: "Primary post feeds", value: "new, hot, rising (25 each run)" },
+      { label: "Sub-community sweep", value: "Top 5 submolts, newest 10 posts each" },
+      { label: "Comment crawl budget", value: "Up to 20 posts, 25 comments per post" },
+      { label: "Comment inclusion threshold", value: "comment_count > 0" },
+    ],
+  },
   isEnabled: () => true,
   ingest: ingestMoltbook,
 };
