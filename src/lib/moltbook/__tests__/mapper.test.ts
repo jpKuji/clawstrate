@@ -15,6 +15,7 @@ describe("mapPost", () => {
     const result = mapPost(mockPost);
 
     expect(result).toEqual({
+      sourceAdapterId: "moltbook",
       platformId: "moltbook",
       platformActionId: "post_post-001",
       actionType: "post",
@@ -119,6 +120,11 @@ describe("mapPost", () => {
   it("sets platformId to 'moltbook'", () => {
     const result = mapPost(mockPost);
     expect(result.platformId).toBe("moltbook");
+  });
+
+  it("sets sourceAdapterId to 'moltbook' by default", () => {
+    const result = mapPost(mockPost);
+    expect(result.sourceAdapterId).toBe("moltbook");
   });
 
   it("maps author karma via nullish coalescing (preserves 0)", () => {
@@ -234,5 +240,10 @@ describe("mapComment", () => {
   it("sets platformId to 'moltbook'", () => {
     const result = mapComment(mockComment, "post-001");
     expect(result.platformId).toBe("moltbook");
+  });
+
+  it("sets sourceAdapterId to 'moltbook' by default", () => {
+    const result = mapComment(mockComment, "post-001");
+    expect(result.sourceAdapterId).toBe("moltbook");
   });
 });

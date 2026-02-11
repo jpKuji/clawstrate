@@ -1,16 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { topics } from "@/lib/db/schema";
-import { desc } from "drizzle-orm";
+import { topics, actionTopics, actions } from "@/lib/db/schema";
+import { desc, sql } from "drizzle-orm";
 import { cacheGet, cacheSet } from "@/lib/redis";
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const limit = Math.min(Number(searchParams.get("limit") || 50), 100);
   const sortBy = searchParams.get("sort") || "velocity";
+  const source = searchParams.get("source") || "all";
 
   // Check cache first
-  const cacheKey = `topics:${sortBy}:${limit}`;
+  const cacheKey = `topics:${sortBy}:${limit}:${source}`;
   const cached = await cacheGet<any>(cacheKey);
   if (cached) {
     return NextResponse.json(typeof cached === "string" ? JSON.parse(cached) : cached);
@@ -24,6 +25,17 @@ export async function GET(req: NextRequest) {
   };
 
   const results = await db.query.topics.findMany({
+    where:
+      source === "all"
+        ? undefined
+        : sql`EXISTS (
+            SELECT 1
+            FROM ${actionTopics}
+            INNER JOIN ${actions}
+              ON ${actions.id} = ${actionTopics.actionId}
+            WHERE ${actionTopics.topicId} = ${topics.id}
+              AND ${actions.platformId} = ${source}
+          )`,
     orderBy: [desc(sortMap[sortBy] || topics.velocity)],
     limit,
   });

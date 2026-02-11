@@ -254,8 +254,7 @@ export async function runAggregation(targetDate?: Date): Promise<{
     topicsAggregated++;
   }
 
-  // 3. Compute topic co-occurrences for the day
-  // For each action that has multiple topics, increment the co-occurrence count for each pair
+  // 3. Compute topic co-occurrences for the day (idempotent per day)
   const multiTopicActions = await db
     .select({
       actionId: actionTopics.actionId,
@@ -273,7 +272,9 @@ export async function runAggregation(targetDate?: Date): Promise<{
     topicsByAction.get(row.actionId)!.push(row.topicId);
   }
 
-  // For each action with 2+ topics, create/increment co-occurrence pairs
+  // For each action with 2+ topics, count pair occurrences for the day
+  const pairCounts = new Map<string, { id1: string; id2: string; count: number }>();
+
   for (const [, topicIds] of topicsByAction) {
     if (topicIds.length < 2) continue;
 
@@ -284,23 +285,38 @@ export async function runAggregation(targetDate?: Date): Promise<{
           ? [topicIds[i], topicIds[j]]
           : [topicIds[j], topicIds[i]];
 
-        await db
-          .insert(topicCooccurrences)
-          .values({
-            topicId1: id1,
-            topicId2: id2,
-            cooccurrenceCount: 1,
-            lastSeenAt: new Date(),
-          })
-          .onConflictDoUpdate({
-            target: [topicCooccurrences.topicId1, topicCooccurrences.topicId2],
-            set: {
-              cooccurrenceCount: sql`${topicCooccurrences.cooccurrenceCount} + 1`,
-              lastSeenAt: new Date(),
-            },
-          });
+        const key = `${id1}:${id2}`;
+        const existing = pairCounts.get(key);
+        if (existing) {
+          existing.count += 1;
+        } else {
+          pairCounts.set(key, { id1, id2, count: 1 });
+        }
       }
     }
+  }
+
+  for (const pair of pairCounts.values()) {
+    await db
+      .insert(topicCooccurrences)
+      .values({
+        topicId1: pair.id1,
+        topicId2: pair.id2,
+        date,
+        cooccurrenceCount: pair.count,
+        lastSeenAt: new Date(),
+      })
+      .onConflictDoUpdate({
+        target: [
+          topicCooccurrences.topicId1,
+          topicCooccurrences.topicId2,
+          topicCooccurrences.date,
+        ],
+        set: {
+          cooccurrenceCount: pair.count,
+          lastSeenAt: new Date(),
+        },
+      });
   }
 
   return { agentsAggregated, topicsAggregated };

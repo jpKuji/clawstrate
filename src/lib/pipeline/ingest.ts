@@ -7,9 +7,9 @@ import {
   interactions,
   syncLog,
 } from "../db/schema";
-import { getMoltbookClient } from "../moltbook/client";
-import { mapPost, mapComment, NormalizedAction } from "../moltbook/mapper";
 import { eq, and } from "drizzle-orm";
+import { getEnabledSourceAdapters } from "../sources";
+import { NormalizedAction } from "../sources/types";
 
 /**
  * Main ingestion function. Call every 30 minutes.
@@ -19,140 +19,85 @@ export async function runIngestion(): Promise<{
   commentsIngested: number;
   errors: string[];
 }> {
-  const client = getMoltbookClient();
   const errors: string[] = [];
   let postsIngested = 0;
   let commentsIngested = 0;
+  const adapters = getEnabledSourceAdapters();
+  if (adapters.length === 0) {
+    return {
+      postsIngested: 0,
+      commentsIngested: 0,
+      errors: ["No enabled source adapters found"],
+    };
+  }
 
-  // Log sync start
-  const [syncEntry] = await db
-    .insert(syncLog)
-    .values({
-      platformId: "moltbook",
-      syncType: "full_cycle",
-      status: "started",
-    })
-    .returning();
+  for (const adapter of adapters) {
+    const [syncEntry] = await db
+      .insert(syncLog)
+      .values({
+        platformId: adapter.platformId,
+        syncType: `full_cycle:${adapter.id}`,
+        status: "started",
+      })
+      .returning();
 
-  try {
-    // 1. Fetch posts from multiple sort orders
-    const [newPosts, hotPosts, risingPosts] = await Promise.all([
-      client.getPosts("new", 25).catch((e) => {
-        errors.push(`new posts: ${e.message}`);
-        return [];
-      }),
-      client.getPosts("hot", 25).catch((e) => {
-        errors.push(`hot posts: ${e.message}`);
-        return [];
-      }),
-      client.getPosts("rising", 25).catch((e) => {
-        errors.push(`rising posts: ${e.message}`);
-        return [];
-      }),
-    ]);
-
-    // Deduplicate by post ID
-    const allPosts = new Map<string, typeof newPosts[0]>();
-    for (const p of [...newPosts, ...hotPosts, ...risingPosts]) {
-      if (p?.id) allPosts.set(p.id, p);
-    }
-
-    // Fetch top submolts for broader coverage
     try {
-      const submolts = await client.getSubmolts();
-      const topSubmolts = submolts
-        .sort((a, b) => (b.post_count || 0) - (a.post_count || 0))
-        .slice(0, 5);
+      const ingestResult = await adapter.ingest();
+      const adapterErrors = ingestResult.errors.map(
+        (e) => `[${adapter.id}] ${e}`
+      );
+      errors.push(...adapterErrors);
+      let adapterPostsIngested = 0;
+      let adapterCommentsIngested = 0;
 
-      for (const submolt of topSubmolts) {
+      console.log(
+        `[ingest:${adapter.id}] Fetched ${ingestResult.postsFetched} posts and ${ingestResult.commentsFetched} comments`
+      );
+      console.log(
+        `[ingest:${adapter.id}] Total normalized actions: ${ingestResult.actions.length}`
+      );
+
+      for (const action of ingestResult.actions) {
         try {
-          const submoltPosts = await client.getSubmoltFeed(
-            submolt.name,
-            "new",
-            10
-          );
-          for (const p of submoltPosts) {
-            if (p?.id) allPosts.set(p.id, p);
+          const result = await upsertAction(action);
+          if (result.isNew) {
+            if (action.actionType === "post") {
+              postsIngested++;
+              adapterPostsIngested++;
+            } else {
+              commentsIngested++;
+              adapterCommentsIngested++;
+            }
           }
         } catch (e: any) {
-          errors.push(`submolt ${submolt.name}: ${e.message}`);
+          errors.push(
+            `[${adapter.id}] upsert ${action.platformActionId}: ${e.message}`
+          );
         }
       }
+
+      await db
+        .update(syncLog)
+        .set({
+          status: adapterErrors.length > 0 ? "completed_with_errors" : "completed",
+          itemsFetched: ingestResult.actions.length,
+          itemsIngested: adapterPostsIngested + adapterCommentsIngested,
+          error: adapterErrors.length > 0 ? adapterErrors.join("; ") : null,
+          completedAt: new Date(),
+        })
+        .where(eq(syncLog.id, syncEntry.id));
     } catch (e: any) {
-      errors.push(`submolts list: ${e.message}`);
+      await db
+        .update(syncLog)
+        .set({
+          status: "failed",
+          error: e.message,
+          completedAt: new Date(),
+        })
+        .where(eq(syncLog.id, syncEntry.id));
+      errors.push(`[${adapter.id}] fatal: ${e.message}`);
+      throw e;
     }
-
-    console.log(
-      `[ingest] Fetched ${allPosts.size} unique posts (${newPosts.length} new, ${hotPosts.length} hot, ${risingPosts.length} rising + submolt feeds)`
-    );
-
-    // 2. Map and ingest each post
-    const normalizedActions: NormalizedAction[] = [];
-
-    for (const post of allPosts.values()) {
-      normalizedActions.push(mapPost(post));
-    }
-
-    // 3. Fetch comments for posts with high engagement + newest posts
-    const postsForComments = [...allPosts.values()]
-      .sort((a, b) => {
-        // Prioritize posts with more comments, then by recency
-        const aScore = (a.comment_count || 0) * 10 + new Date(a.created_at).getTime() / 1e12;
-        const bScore = (b.comment_count || 0) * 10 + new Date(b.created_at).getTime() / 1e12;
-        return bScore - aScore;
-      })
-      .filter((p) => (p.comment_count || 0) > 0)
-      .slice(0, 20);
-
-    for (const post of postsForComments) {
-      try {
-        const comments = await client.getComments(post.id, "top", 25);
-        for (const comment of comments) {
-          normalizedActions.push(mapComment(comment, post.id));
-        }
-      } catch (e: any) {
-        errors.push(`comments for ${post.id}: ${e.message}`);
-      }
-    }
-
-    console.log(
-      `[ingest] Total normalized actions: ${normalizedActions.length}`
-    );
-
-    // 4. Upsert all actions
-    for (const action of normalizedActions) {
-      try {
-        const result = await upsertAction(action);
-        if (result.isNew) {
-          if (action.actionType === "post") postsIngested++;
-          else commentsIngested++;
-        }
-      } catch (e: any) {
-        errors.push(`upsert ${action.platformActionId}: ${e.message}`);
-      }
-    }
-
-    // Update sync log
-    await db
-      .update(syncLog)
-      .set({
-        status: errors.length > 0 ? "completed_with_errors" : "completed",
-        itemsFetched: normalizedActions.length,
-        itemsIngested: postsIngested + commentsIngested,
-        error: errors.length > 0 ? errors.join("; ") : null,
-        completedAt: new Date(),
-      })
-      .where(eq(syncLog.id, syncEntry.id));
-  } catch (e: any) {
-    await db
-      .update(syncLog)
-      .set({
-        status: "failed",
-        error: e.message,
-        completedAt: new Date(),
-      })
-      .where(eq(syncLog.id, syncEntry.id));
-    throw e;
   }
 
   return { postsIngested, commentsIngested, errors };
@@ -224,7 +169,10 @@ async function upsertAction(
       downvotes: action.downvotes,
       replyCount: action.replyCount,
       performedAt: action.performedAt,
-      rawData: action.rawData,
+      rawData: {
+        sourceAdapterId: action.sourceAdapterId,
+        ...action.rawData,
+      },
     })
     .returning();
 

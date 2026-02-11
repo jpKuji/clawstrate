@@ -88,7 +88,7 @@ describe("runAnalysis", () => {
 
     const result = await runAnalysis();
 
-    expect(result.agentsUpdated).toBe(2);
+    expect(result.agentsUpdated).toBe(3);
     expect(mockUpdate).toHaveBeenCalled();
   });
 
@@ -110,7 +110,7 @@ describe("runAnalysis", () => {
 
     const result = await runAnalysis();
 
-    expect(result.agentsUpdated).toBe(2);
+    expect(result.agentsUpdated).toBe(3);
     expect(mockUpdate).toHaveBeenCalled();
   });
 
@@ -288,7 +288,7 @@ describe("runAnalysis", () => {
 
     const result = await runAnalysis();
 
-    expect(result.agentsUpdated).toBe(1);
+    expect(result.agentsUpdated).toBe(2);
     expect(result.topicsUpdated).toBe(1);
   });
 

@@ -1,13 +1,20 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { actions, agents, narratives, topics, enrichments } from "@/lib/db/schema";
-import { count, avg, gte, and, lt, eq } from "drizzle-orm";
+import { actions, agents, topics, enrichments, actionTopics } from "@/lib/db/schema";
+import { count, avg, gte, and, lt, eq, sql, inArray, desc } from "drizzle-orm";
 import { subHours } from "date-fns";
 import { cacheGet, cacheSet } from "@/lib/redis";
 
-export async function GET() {
+export async function GET(req?: NextRequest) {
+  const { searchParams } = new URL(
+    req?.url || "http://localhost/api/v1/dashboard"
+  );
+  const source = searchParams.get("source") || "all";
+  const sourceKey = source === "all" ? "all" : source.toLowerCase();
+
   // Check cache first
-  const cached = await cacheGet<any>("dashboard");
+  const cacheKey = `dashboard:${sourceKey}`;
+  const cached = await cacheGet<any>(cacheKey);
   if (cached) {
     return NextResponse.json(typeof cached === "string" ? JSON.parse(cached) : cached);
   }
@@ -15,6 +22,8 @@ export async function GET() {
   const now = new Date();
   const last24h = subHours(now, 24);
   const last48h = subHours(now, 48);
+  const sourceActionFilter =
+    source === "all" ? undefined : eq(actions.platformId, source);
 
   const [
     totalActions,
@@ -28,26 +37,65 @@ export async function GET() {
     topTopics,
     topAgents,
   ] = await Promise.all([
-    db.select({ count: count(actions.id) }).from(actions),
-    db.select({ count: count(agents.id) }).from(agents),
+    source === "all"
+      ? db.select({ count: count(actions.id) }).from(actions)
+      : db
+          .select({ count: count(actions.id) })
+          .from(actions)
+          .where(eq(actions.platformId, source)),
+    source === "all"
+      ? db.select({ count: count(agents.id) }).from(agents)
+      : db
+          .select({
+            count: sql<number>`COUNT(DISTINCT ${actions.agentId})`.as("count"),
+          })
+          .from(actions)
+          .where(sourceActionFilter),
     db
       .select({ count: count(actions.id) })
       .from(actions)
-      .where(gte(actions.performedAt, last24h)),
+      .where(
+        and(gte(actions.performedAt, last24h), sourceActionFilter)
+      ),
     db
       .select({ count: count(actions.id) })
       .from(actions)
-      .where(and(gte(actions.performedAt, last48h), lt(actions.performedAt, last24h))),
-    db
-      .select({ count: count(agents.id) })
-      .from(agents)
-      .where(lt(agents.firstSeenAt, last24h)),
+      .where(
+        and(
+          gte(actions.performedAt, last48h),
+          lt(actions.performedAt, last24h),
+          sourceActionFilter
+        )
+      ),
+    source === "all"
+      ? db
+          .select({ count: count(agents.id) })
+          .from(agents)
+          .where(lt(agents.firstSeenAt, last24h))
+      : db
+          .select({
+            count: sql<number>`COUNT(DISTINCT ${actions.agentId})`.as("count"),
+          })
+          .from(actions)
+          .where(
+            and(
+              lt(actions.performedAt, last24h),
+              sourceActionFilter
+            )
+          ),
     db
       .select({
         avgAutonomy: avg(enrichments.autonomyScore),
         avgSentiment: avg(enrichments.sentiment),
       })
-      .from(enrichments),
+      .from(enrichments)
+      .innerJoin(actions, eq(enrichments.actionId, actions.id))
+      .where(
+        and(
+          gte(actions.performedAt, last24h),
+          sourceActionFilter
+        )
+      ),
     db
       .select({
         avgAutonomy: avg(enrichments.autonomyScore),
@@ -58,18 +106,58 @@ export async function GET() {
       .where(and(
         gte(actions.performedAt, last48h),
         lt(actions.performedAt, last24h),
+        sourceActionFilter,
       )),
     db.query.narratives.findFirst({
       orderBy: (n, { desc }) => [desc(n.generatedAt)],
     }),
-    db.query.topics.findMany({
-      orderBy: (t, { desc }) => [desc(t.velocity)],
-      limit: 5,
-    }),
-    db.query.agents.findMany({
-      orderBy: (a, { desc }) => [desc(a.influenceScore)],
-      limit: 5,
-    }),
+    source === "all"
+      ? db.query.topics.findMany({
+          orderBy: (t, { desc }) => [desc(t.velocity)],
+          limit: 5,
+        })
+      : (async () => {
+          const filteredTopicIds = await db
+            .select({
+              topicId: actionTopics.topicId,
+              recentCount: count(actionTopics.id).as("recent_count"),
+            })
+            .from(actionTopics)
+            .innerJoin(actions, eq(actionTopics.actionId, actions.id))
+            .where(
+              and(
+                eq(actions.platformId, source),
+                gte(actions.performedAt, last24h)
+              )
+            )
+            .groupBy(actionTopics.topicId)
+            .orderBy(desc(count(actionTopics.id)))
+            .limit(5);
+
+          if (filteredTopicIds.length === 0) return [];
+          const ids = filteredTopicIds.map((r) => r.topicId);
+          const topicRows = await db.query.topics.findMany({
+            where: inArray(topics.id, ids),
+          });
+          const byId = new Map(topicRows.map((t) => [t.id, t]));
+          return filteredTopicIds
+            .map((r) => byId.get(r.topicId))
+            .filter(Boolean);
+        })(),
+    source === "all"
+      ? db.query.agents.findMany({
+          orderBy: (a, { desc }) => [desc(a.influenceScore)],
+          limit: 5,
+        })
+      : db.query.agents.findMany({
+          where: sql`EXISTS (
+            SELECT 1 FROM actions a
+            WHERE a.agent_id = ${agents.id}
+              AND a.platform_id = ${source}
+          )`,
+          orderBy: (a, { desc }) => [desc(a.influenceScore)],
+          limit: 5,
+        }),
   ]);
 
   const currentTotalActions = totalActions[0]?.count || 0;
@@ -129,7 +217,7 @@ export async function GET() {
   };
 
   // Cache for 60 seconds
-  await cacheSet("dashboard", response, 60);
+  await cacheSet(cacheKey, response, 60);
 
   return NextResponse.json(response);
 }

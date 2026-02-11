@@ -1,5 +1,5 @@
 import { db } from "./index";
-import { platforms } from "./schema";
+import { platforms, accounts } from "./schema";
 
 async function seed() {
   await db
@@ -15,6 +15,17 @@ async function seed() {
         commentCooldown: 20, // seconds
       },
       isActive: true,
+    })
+    .onConflictDoNothing();
+
+  await db
+    .insert(accounts)
+    .values({
+      id: "default",
+      name: "Default Account",
+      tier: "free",
+      monthlyBriefingViewQuota: 1000,
+      monthlyAlertInteractionQuota: 2000,
     })
     .onConflictDoNothing();
 

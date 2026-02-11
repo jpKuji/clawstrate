@@ -128,6 +128,28 @@ export const agentIdentities = pgTable(
   ]
 );
 
+export const agentIdentityLinks = pgTable(
+  "agent_identity_links",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    identityId1: uuid("identity_id_1")
+      .references(() => agentIdentities.id)
+      .notNull(),
+    identityId2: uuid("identity_id_2")
+      .references(() => agentIdentities.id)
+      .notNull(),
+    linkStatus: text("link_status").notNull().default("proposed"), // proposed, confirmed, rejected
+    confidence: real("confidence"),
+    rationale: text("rationale"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (t) => [
+    uniqueIndex("idx_agent_identity_link_unique").on(t.identityId1, t.identityId2),
+    index("idx_agent_identity_link_status").on(t.linkStatus),
+  ]
+);
+
 export const communities = pgTable(
   "communities",
   {
@@ -419,6 +441,92 @@ export const syncLog = pgTable(
   ]
 );
 
+export const pipelineRuns = pgTable(
+  "pipeline_runs",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    triggerType: text("trigger_type").notNull(), // cron, manual, replay
+    source: text("source").notNull().default("pipeline"),
+    status: text("status").notNull().default("started"), // started, completed, failed, completed_with_errors
+    startedAt: timestamp("started_at").defaultNow().notNull(),
+    completedAt: timestamp("completed_at"),
+    error: text("error"),
+    metadata: jsonb("metadata").$type<Record<string, unknown>>(),
+  },
+  (t) => [
+    index("idx_pipeline_runs_started").on(t.startedAt),
+    index("idx_pipeline_runs_status").on(t.status),
+  ]
+);
+
+export const pipelineStageRuns = pgTable(
+  "pipeline_stage_runs",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    pipelineRunId: uuid("pipeline_run_id")
+      .references(() => pipelineRuns.id)
+      .notNull(),
+    stage: text("stage").notNull(), // ingest, enrich, analyze, aggregate, coordination, briefing
+    status: text("status").notNull().default("started"), // started, completed, failed, skipped
+    startedAt: timestamp("started_at").defaultNow().notNull(),
+    completedAt: timestamp("completed_at"),
+    durationMs: integer("duration_ms"),
+    result: jsonb("result").$type<Record<string, unknown>>(),
+    error: text("error"),
+  },
+  (t) => [
+    uniqueIndex("idx_pipeline_stage_run_unique").on(t.pipelineRunId, t.stage),
+    index("idx_pipeline_stage_stage").on(t.stage),
+  ]
+);
+
+export const accounts = pgTable("accounts", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  tier: text("tier").notNull().default("free"),
+  monthlyBriefingViewQuota: integer("monthly_briefing_view_quota").default(1000),
+  monthlyAlertInteractionQuota: integer("monthly_alert_interaction_quota").default(2000),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const productEvents = pgTable(
+  "product_events",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    accountId: text("account_id").references(() => accounts.id),
+    eventType: text("event_type").notNull(), // briefing_view, alert_interaction, watchlist_add, watchlist_remove
+    narrativeId: uuid("narrative_id").references(() => narratives.id),
+    agentId: uuid("agent_id").references(() => agents.id),
+    topicId: uuid("topic_id").references(() => topics.id),
+    metadata: jsonb("metadata").$type<Record<string, unknown>>(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (t) => [
+    index("idx_product_events_account").on(t.accountId),
+    index("idx_product_events_type").on(t.eventType),
+    index("idx_product_events_created").on(t.createdAt),
+  ]
+);
+
+export const accountUsageDaily = pgTable(
+  "account_usage_daily",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    accountId: text("account_id")
+      .references(() => accounts.id)
+      .notNull(),
+    date: timestamp("date").notNull(),
+    briefingViews: integer("briefing_views").default(0),
+    alertInteractions: integer("alert_interactions").default(0),
+    watchlistInteractions: integer("watchlist_interactions").default(0),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (t) => [
+    uniqueIndex("idx_account_usage_daily_unique").on(t.accountId, t.date),
+    index("idx_account_usage_daily_date").on(t.date),
+  ]
+);
+
 // ============================================================
 // DAILY AGGREGATION TABLES (Phase 2.1)
 // ============================================================
@@ -480,13 +588,15 @@ export const topicCooccurrences = pgTable(
     topicId2: uuid("topic_id_2")
       .references(() => topics.id)
       .notNull(),
+    date: timestamp("date").notNull(), // Day boundary in UTC
     cooccurrenceCount: integer("cooccurrence_count").default(0),
     lastSeenAt: timestamp("last_seen_at").defaultNow(),
   },
   (t) => [
-    uniqueIndex("idx_topic_cooccurrence_unique").on(t.topicId1, t.topicId2),
+    uniqueIndex("idx_topic_cooccurrence_unique").on(t.topicId1, t.topicId2, t.date),
     index("idx_topic_cooccurrence_topic1").on(t.topicId1),
     index("idx_topic_cooccurrence_topic2").on(t.topicId2),
+    index("idx_topic_cooccurrence_date").on(t.date),
   ]
 );
 
@@ -499,12 +609,20 @@ export const coordinationSignals = pgTable(
   {
     id: uuid("id").defaultRandom().primaryKey(),
     signalType: text("signal_type").notNull(), // "temporal_cluster", "content_similarity", "reply_clique"
+    signalHash: text("signal_hash").notNull(), // Stable dedupe signature
+    windowStart: timestamp("window_start").notNull(),
+    windowEnd: timestamp("window_end").notNull(),
     confidence: real("confidence").notNull(), // 0-1
     agentIds: jsonb("agent_ids").$type<string[]>().notNull(),
     evidence: text("evidence"), // Human-readable description of why this was flagged
     detectedAt: timestamp("detected_at").defaultNow().notNull(),
   },
   (t) => [
+    uniqueIndex("idx_coordination_signal_dedupe").on(
+      t.signalType,
+      t.signalHash,
+      t.windowStart
+    ),
     index("idx_coordination_signal_type").on(t.signalType),
     index("idx_coordination_detected").on(t.detectedAt),
   ]
@@ -532,6 +650,20 @@ export const agentIdentitiesRelations = relations(agentIdentities, ({ one }) => 
     references: [platforms.id],
   }),
 }));
+
+export const pipelineRunsRelations = relations(pipelineRuns, ({ many }) => ({
+  stages: many(pipelineStageRuns),
+}));
+
+export const pipelineStageRunsRelations = relations(
+  pipelineStageRuns,
+  ({ one }) => ({
+    pipelineRun: one(pipelineRuns, {
+      fields: [pipelineStageRuns.pipelineRunId],
+      references: [pipelineRuns.id],
+    }),
+  })
+);
 
 export const actionsRelations = relations(actions, ({ one, many }) => ({
   agent: one(agents, {

@@ -9,6 +9,19 @@ import {
 } from "../db/schema";
 import { eq, and, gte, inArray, count } from "drizzle-orm";
 import { subDays, subHours } from "date-fns";
+import { createHash } from "crypto";
+
+function stableHash(payload: Record<string, unknown>): string {
+  return createHash("sha256").update(JSON.stringify(payload)).digest("hex");
+}
+
+function twoHourBucket(date: Date): Date {
+  const d = new Date(date);
+  d.setUTCMinutes(0, 0, 0);
+  const currentHour = d.getUTCHours();
+  d.setUTCHours(Math.floor(currentHour / 2) * 2);
+  return d;
+}
 
 /**
  * Detect coordination patterns among agents.
@@ -114,14 +127,34 @@ async function detectTemporalClustering(): Promise<number> {
             0.5 + (agentsInWindow.size - 3) * 0.1,
             0.95
           );
-
-          await db.insert(coordinationSignals).values({
-            signalType: "temporal_cluster",
-            confidence,
-            agentIds,
-            evidence: `${agentIds.length} unconnected agents posted about "${topicActions[i].topicSlug}" within 2h window. Only ${interactionCount}/${maxPossible} possible interactions exist.`,
+          const sortedAgentIds = [...agentIds].sort();
+          const bucketStart = twoHourBucket(new Date(windowStart));
+          const bucketEnd = new Date(bucketStart.getTime() + 2 * 60 * 60 * 1000);
+          const signalHash = stableHash({
+            topicId,
+            agents: sortedAgentIds,
           });
-          signalsFound++;
+
+          const inserted = await db
+            .insert(coordinationSignals)
+            .values({
+              signalType: "temporal_cluster",
+              signalHash,
+              windowStart: bucketStart,
+              windowEnd: bucketEnd,
+              confidence,
+              agentIds: sortedAgentIds,
+              evidence: `${agentIds.length} unconnected agents posted about "${topicActions[i].topicSlug}" within 2h window. Only ${interactionCount}/${maxPossible} possible interactions exist.`,
+            })
+            .onConflictDoNothing({
+              target: [
+                coordinationSignals.signalType,
+                coordinationSignals.signalHash,
+                coordinationSignals.windowStart,
+              ],
+            })
+            .returning({ id: coordinationSignals.id });
+          if (inserted.length > 0) signalsFound++;
         }
       }
     }
@@ -135,7 +168,8 @@ async function detectTemporalClustering(): Promise<number> {
  * Jaccard similarity > 0.8 on topic vectors over 7 days.
  */
 async function detectContentSimilarity(): Promise<number> {
-  const last7d = subDays(new Date(), 7);
+  const now = new Date();
+  const last7d = subDays(now, 7);
   let signalsFound = 0;
 
   // Build topic vector per agent (which topics they post about)
@@ -172,13 +206,31 @@ async function detectContentSimilarity(): Promise<number> {
       const similarity = intersection.size / union.size;
 
       if (similarity > 0.8) {
-        await db.insert(coordinationSignals).values({
-          signalType: "content_similarity",
-          confidence: similarity,
-          agentIds: [agentIds[i], agentIds[j]],
-          evidence: `Jaccard topic similarity of ${similarity.toFixed(2)} over 7 days. ${intersection.size} shared topics out of ${union.size} total.`,
+        const sortedAgentIds = [agentIds[i], agentIds[j]].sort();
+        const signalHash = stableHash({
+          agents: sortedAgentIds,
+          sharedTopicCount: intersection.size,
         });
-        signalsFound++;
+        const inserted = await db
+          .insert(coordinationSignals)
+          .values({
+            signalType: "content_similarity",
+            signalHash,
+            windowStart: last7d,
+            windowEnd: now,
+            confidence: similarity,
+            agentIds: sortedAgentIds,
+            evidence: `Jaccard topic similarity of ${similarity.toFixed(2)} over 7 days. ${intersection.size} shared topics out of ${union.size} total.`,
+          })
+          .onConflictDoNothing({
+            target: [
+              coordinationSignals.signalType,
+              coordinationSignals.signalHash,
+              coordinationSignals.windowStart,
+            ],
+          })
+          .returning({ id: coordinationSignals.id });
+        if (inserted.length > 0) signalsFound++;
       }
     }
   }
@@ -191,7 +243,8 @@ async function detectContentSimilarity(): Promise<number> {
  * Groups where > 80% of interactions are within the group.
  */
 async function detectReplyCliques(): Promise<number> {
-  const last7d = subDays(new Date(), 7);
+  const now = new Date();
+  const last7d = subDays(now, 7);
   let signalsFound = 0;
 
   // Get all recent interactions
@@ -250,14 +303,33 @@ async function detectReplyCliques(): Promise<number> {
         0.6 + (internalCount / totalCount - 0.8) * 2,
         0.95
       );
-
-      await db.insert(coordinationSignals).values({
-        signalType: "reply_clique",
-        confidence,
-        agentIds: groupArray,
-        evidence: `${groupArray.length}-agent clique with ${((internalCount / totalCount) * 100).toFixed(0)}% internal interactions (${internalCount}/${totalCount}).`,
+      const sortedAgentIds = [...groupArray].sort();
+      const signalHash = stableHash({
+        agents: sortedAgentIds,
+        internalCount,
+        totalCount,
       });
-      signalsFound++;
+
+      const inserted = await db
+        .insert(coordinationSignals)
+        .values({
+          signalType: "reply_clique",
+          signalHash,
+          windowStart: last7d,
+          windowEnd: now,
+          confidence,
+          agentIds: sortedAgentIds,
+          evidence: `${groupArray.length}-agent clique with ${((internalCount / totalCount) * 100).toFixed(0)}% internal interactions (${internalCount}/${totalCount}).`,
+        })
+        .onConflictDoNothing({
+          target: [
+            coordinationSignals.signalType,
+            coordinationSignals.signalHash,
+            coordinationSignals.windowStart,
+          ],
+        })
+        .returning({ id: coordinationSignals.id });
+      if (inserted.length > 0) signalsFound++;
     }
   }
 

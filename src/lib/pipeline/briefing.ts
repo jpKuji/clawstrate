@@ -25,7 +25,7 @@ Return your briefing as a JSON object with this structure:
       "title": "SecurityBot's Coordination Spike",
       "content": "Markdown content for this section",
       "citations": [
-        { "type": "agent", "id": "agent-display-name", "context": "brief note on relevance" },
+        { "type": "agent", "agentId": "uuid-from-data", "label": "agent-display-name", "context": "brief note on relevance" },
         { "type": "topic", "slug": "topic-slug", "context": "brief note" },
         { "type": "action", "id": "platform-action-id", "context": "brief note" }
       ]
@@ -50,6 +50,8 @@ For "alerts", include any coordination signals, anomalies, or notable behavioral
 
 Keep each section's content concise. Be specific — use agent names, topic names, numbers. Don't hedge excessively. If the data is sparse, say so briefly and focus on what IS interesting.
 
+Use canonical UUIDs for all agent citations via "agentId". Use "label" for human-readable name.
+
 IMPORTANT: Return ONLY the JSON object, no markdown code fences or other text.`;
 
 /**
@@ -73,40 +75,185 @@ function parseJsonResponse(text: string): Record<string, unknown> | null {
   }
 }
 
+type BriefingCitation = {
+  type: "agent" | "topic" | "action";
+  id?: string;
+  slug?: string;
+  agentId?: string;
+  label?: string;
+  context?: string;
+};
+
+type BriefingSection = {
+  title: string;
+  content: string;
+  citations?: BriefingCitation[];
+};
+
+type ParsedBriefing = {
+  sections?: BriefingSection[];
+  metrics?: Record<string, { label: string; value: string; change?: string }>;
+  alerts?: Array<{ level: "info" | "warning" | "critical"; message: string }>;
+  _validationWarnings?: string[];
+};
+
+async function normalizeAndValidateCitations(
+  parsed: ParsedBriefing,
+  topAgentsList: Array<{ id: string; displayName: string }>,
+  topTopicsList: Array<{ slug: string }>,
+  networkAutonomy: number
+): Promise<{ normalized: ParsedBriefing; warnings: string[] }> {
+  const warnings: string[] = [];
+  if (!parsed.sections || !Array.isArray(parsed.sections)) {
+    return { normalized: parsed, warnings };
+  }
+
+  const normalizedSections: BriefingSection[] = [];
+
+  for (const section of parsed.sections) {
+    const normalizedCitations: BriefingCitation[] = [];
+
+    for (const citation of section.citations || []) {
+      if (citation.type === "agent") {
+        let agentId = citation.agentId;
+        let label = citation.label ?? citation.id;
+
+        // Backward compatibility: model may still emit "id" as display name.
+        if (!agentId && citation.id) {
+          const byName = topAgentsList.find(
+            (a) => a.displayName.toLowerCase() === citation.id!.toLowerCase()
+          );
+          if (byName) {
+            agentId = byName.id;
+            label = byName.displayName;
+          } else {
+            const dbAgent = await db.query.agents.findFirst({
+              where: sql`LOWER(${agents.displayName}) = LOWER(${citation.id})`,
+            });
+            if (dbAgent) {
+              agentId = dbAgent.id;
+              label = dbAgent.displayName;
+            }
+          }
+        }
+
+        if (agentId) {
+          const dbAgent = await db.query.agents.findFirst({
+            where: eq(agents.id, agentId),
+          });
+          if (!dbAgent) {
+            warnings.push(`Cited agentId "${agentId}" not found in database`);
+            continue;
+          }
+          normalizedCitations.push({
+            type: "agent",
+            agentId,
+            label: label || dbAgent.displayName,
+            context: citation.context,
+          });
+        } else {
+          warnings.push(
+            `Agent citation missing canonical agentId (section "${section.title}")`
+          );
+        }
+        continue;
+      }
+
+      if (citation.type === "topic" && citation.slug) {
+        const topicExists =
+          topTopicsList.some((t) => t.slug === citation.slug) ||
+          (await db.query.topics.findFirst({
+            where: eq(topics.slug, citation.slug),
+          }));
+        if (!topicExists) {
+          warnings.push(`Cited topic "${citation.slug}" not found in database`);
+          continue;
+        }
+      }
+
+      normalizedCitations.push(citation);
+    }
+
+    normalizedSections.push({
+      ...section,
+      citations: normalizedCitations,
+    });
+  }
+
+  // Validate that claimed metrics roughly match actual data
+  if (parsed.metrics) {
+    for (const metric of Object.values(parsed.metrics)) {
+      if (metric.label.toLowerCase().includes("autonomy") && metric.value) {
+        const claimed = parseFloat(metric.value);
+        if (!isNaN(claimed) && Math.abs(claimed - networkAutonomy) > 0.15) {
+          warnings.push(
+            `Claimed autonomy (${claimed}) differs significantly from actual (${networkAutonomy.toFixed(2)})`
+          );
+        }
+      }
+    }
+  }
+
+  return {
+    normalized: {
+      ...parsed,
+      sections: normalizedSections,
+    },
+    warnings,
+  };
+}
+
 /**
  * Generate a narrative briefing. Call every 6 hours.
  */
 export async function generateBriefing(): Promise<{ narrativeId: string }> {
-  const now = new Date();
-  const periodStart = subHours(now, 6);
-  const threeDaysAgo = subDays(now, 3);
+  return generateNarrativeBriefing({
+    type: "briefing_6h",
+    lookbackHours: 6,
+    trendLookbackDays: 3,
+    titlePrefix: "Agent Network Briefing",
+  });
+}
 
-  // Gather data for the briefing
+export async function generateWeeklyExecutiveBriefing(): Promise<{
+  narrativeId: string;
+}> {
+  return generateNarrativeBriefing({
+    type: "weekly_summary",
+    lookbackHours: 24 * 7,
+    trendLookbackDays: 14,
+    titlePrefix: "Executive Weekly Briefing",
+  });
+}
+
+async function generateNarrativeBriefing(opts: {
+  type: "briefing_6h" | "weekly_summary";
+  lookbackHours: number;
+  trendLookbackDays: number;
+  titlePrefix: string;
+}): Promise<{ narrativeId: string }> {
+  const now = new Date();
+  const periodStart = subHours(now, opts.lookbackHours);
+  const trendLookback = subDays(now, opts.trendLookbackDays);
+
   const periodActions = await db
     .select({ count: count(actions.id) })
     .from(actions)
     .where(gte(actions.performedAt, periodStart));
-
   const activeAgents = await db
     .select({
       count: sql<number>`COUNT(DISTINCT ${actions.agentId})`.as("count"),
     })
     .from(actions)
     .where(gte(actions.performedAt, periodStart));
-
-  // Top topics by velocity
   const topTopicsList = await db.query.topics.findMany({
     orderBy: (t, { desc }) => [desc(t.velocity)],
     limit: 10,
   });
-
-  // Top agents by influence
   const topAgentsList = await db.query.agents.findMany({
     orderBy: (a, { desc }) => [desc(a.influenceScore)],
     limit: 10,
   });
-
-  // Recent high-autonomy posts
   const highAutonomyPosts = await db
     .select({
       title: actions.title,
@@ -123,8 +270,6 @@ export async function generateBriefing(): Promise<{ narrativeId: string }> {
     )
     .orderBy(desc(enrichments.autonomyScore))
     .limit(10);
-
-  // Network averages
   const networkAvg = await db
     .select({
       avgAutonomy: avg(enrichments.autonomyScore),
@@ -133,16 +278,12 @@ export async function generateBriefing(): Promise<{ narrativeId: string }> {
     .from(enrichments)
     .innerJoin(actions, eq(enrichments.actionId, actions.id))
     .where(gte(actions.performedAt, periodStart));
-
-  // Coordination signals for the period
   const recentSignals = await db
     .select()
     .from(coordinationSignals)
     .where(gte(coordinationSignals.detectedAt, periodStart))
     .orderBy(desc(coordinationSignals.confidence))
     .limit(10);
-
-  // Daily agent stats (last 3 days for trend context)
   const recentAgentStats = await db
     .select({
       date: dailyAgentStats.date,
@@ -153,11 +294,9 @@ export async function generateBriefing(): Promise<{ narrativeId: string }> {
       avgOriginality: dailyAgentStats.avgOriginality,
     })
     .from(dailyAgentStats)
-    .where(gte(dailyAgentStats.date, threeDaysAgo))
+    .where(gte(dailyAgentStats.date, trendLookback))
     .orderBy(desc(dailyAgentStats.date))
     .limit(50);
-
-  // Daily topic stats (last 3 days for trend context)
   const recentTopicStats = await db
     .select({
       date: dailyTopicStats.date,
@@ -168,11 +307,10 @@ export async function generateBriefing(): Promise<{ narrativeId: string }> {
       avgSentiment: dailyTopicStats.avgSentiment,
     })
     .from(dailyTopicStats)
-    .where(gte(dailyTopicStats.date, threeDaysAgo))
+    .where(gte(dailyTopicStats.date, trendLookback))
     .orderBy(desc(dailyTopicStats.date))
     .limit(50);
 
-  // Compose data summary for Sonnet
   const dataSummary = `
 PERIOD: ${format(periodStart, "yyyy-MM-dd HH:mm")} to ${format(now, "yyyy-MM-dd HH:mm")} UTC
 TOTAL ACTIONS: ${periodActions[0]?.count || 0}
@@ -183,8 +321,8 @@ NETWORK SENTIMENT AVG: ${Number(networkAvg[0]?.avgSentiment || 0).toFixed(2)}
 TOP TOPICS (by velocity):
 ${topTopicsList.map((t) => `- ${t.name} (slug: ${t.slug}, velocity: ${t.velocity?.toFixed(2)}/hr, agents: ${t.agentCount})`).join("\n")}
 
-TOP AGENTS (by influence):
-${topAgentsList.map((a) => `- ${a.displayName} (influence: ${a.influenceScore?.toFixed(2)}, autonomy: ${a.autonomyScore?.toFixed(2)}, type: ${a.agentType})`).join("\n")}
+TOP AGENTS (by influence, include these UUIDs in agent citations):
+${topAgentsList.map((a) => `- ${a.displayName} (agentId: ${a.id}, influence: ${a.influenceScore?.toFixed(2)}, autonomy: ${a.autonomyScore?.toFixed(2)}, type: ${a.agentType})`).join("\n")}
 
 HIGH-AUTONOMY SUBSTANTIVE POSTS THIS PERIOD:
 ${highAutonomyPosts.map((p) => `- [${p.agentName}] "${p.title || "(untitled)"}" (autonomy: ${Number(p.autonomyScore).toFixed(2)})\n  ${(p.content || "").slice(0, 200)}`).join("\n\n")}
@@ -192,7 +330,7 @@ ${highAutonomyPosts.map((p) => `- [${p.agentName}] "${p.title || "(untitled)"}" 
 COORDINATION SIGNALS DETECTED:
 ${recentSignals.length === 0 ? "None detected this period." : recentSignals.map((s) => `- [${s.signalType}] confidence: ${s.confidence.toFixed(2)} — ${s.evidence || "no details"} (agents: ${(s.agentIds as string[]).length})`).join("\n")}
 
-DAILY TRENDS (last 3 days):
+DAILY TRENDS:
 Agent activity trend: ${recentAgentStats.length} agent-day records
 ${recentAgentStats.slice(0, 10).map((s) => `- ${format(s.date, "MM-dd")}: posts=${s.postCount}, comments=${s.commentCount}, sentiment=${s.avgSentiment?.toFixed(2) ?? "n/a"}`).join("\n")}
 
@@ -200,7 +338,6 @@ Topic velocity trend: ${recentTopicStats.length} topic-day records
 ${recentTopicStats.slice(0, 10).map((s) => `- ${format(s.date, "MM-dd")}: velocity=${s.velocity?.toFixed(2)}/hr, agents=${s.agentCount}, actions=${s.actionCount}`).join("\n")}
 `.trim();
 
-  // Generate briefing
   const response = await anthropic.messages.create({
     model: MODEL,
     max_tokens: 2048,
@@ -214,30 +351,37 @@ ${recentTopicStats.slice(0, 10).map((s) => `- ${format(s.date, "MM-dd")}: veloci
 
   const rawContent =
     response.content[0].type === "text" ? response.content[0].text : "";
+  const parsed = parseJsonResponse(rawContent) as ParsedBriefing | null;
 
-  // Parse structured JSON from response
-  const parsed = parseJsonResponse(rawContent);
-  const briefingContent = parsed ? JSON.stringify(parsed) : rawContent;
-
-  // Extract title from first section or generate default
-  let title: string;
-  if (parsed && Array.isArray((parsed as { sections?: unknown[] }).sections)) {
-    const sections = (parsed as { sections: { title: string }[] }).sections;
-    title = sections[0]?.title
-      ? `Agent Network Briefing — ${format(now, "MMM d, HH:mm")}`
-      : `Agent Network Briefing — ${format(now, "MMM d, HH:mm")}`;
-  } else {
-    const titleMatch = rawContent.match(/^##?\s+(.+)$/m);
-    title =
-      titleMatch?.[1] ||
-      `Agent Network Briefing — ${format(now, "MMM d, HH:mm")}`;
+  let parsedForStorage = parsed;
+  const warnings: string[] = [];
+  if (parsedForStorage) {
+    const validation = await normalizeAndValidateCitations(
+      parsedForStorage,
+      topAgentsList.map((a) => ({ id: a.id, displayName: a.displayName })),
+      topTopicsList.map((t) => ({ slug: t.slug })),
+      Number(networkAvg[0]?.avgAutonomy || 0)
+    );
+    parsedForStorage = validation.normalized;
+    warnings.push(...validation.warnings);
   }
 
-  // Generate summary via Haiku
-  const summaryInput = parsed
-    ? (parsed as { sections?: { title: string; content: string }[] }).sections
-        ?.map((s) => `${s.title}: ${s.content}`)
-        .join("\n\n") || rawContent
+  if (warnings.length > 0) {
+    console.log(`[briefing] Validation warnings: ${warnings.join("; ")}`);
+  }
+
+  if (parsedForStorage && warnings.length > 0) {
+    parsedForStorage._validationWarnings = warnings;
+  }
+
+  const briefingContent = parsedForStorage
+    ? JSON.stringify(parsedForStorage)
+    : rawContent;
+  const title = `${opts.titlePrefix} — ${format(now, "MMM d, HH:mm")}`;
+
+  const summaryInput = parsedForStorage
+    ? parsedForStorage.sections?.map((s) => `${s.title}: ${s.content}`).join("\n\n") ||
+      rawContent
     : rawContent;
 
   const summaryResponse = await anthropic.messages.create({
@@ -255,84 +399,12 @@ ${recentTopicStats.slice(0, 10).map((s) => `- ${format(s.date, "MM-dd")}: veloci
       ? summaryResponse.content[0].text
       : "";
 
-  // Validate briefing citations (Phase 4.5)
-  const warnings: string[] = [];
-
-  if (parsed && Array.isArray((parsed as { sections?: unknown[] }).sections)) {
-    const sections = (parsed as { sections: Array<{ title: string; citations?: Array<{ type: string; id?: string; slug?: string }> }> }).sections;
-
-    for (const section of sections) {
-      if (!section.citations) continue;
-
-      for (const citation of section.citations) {
-        if (citation.type === "agent" && citation.id) {
-          // Check if the cited agent actually exists
-          const agentExists = topAgentsList.some(
-            (a) => a.displayName.toLowerCase() === citation.id!.toLowerCase()
-          );
-          if (!agentExists) {
-            // Try a broader DB check
-            const dbAgent = await db.query.agents.findFirst({
-              where: sql`LOWER(${agents.displayName}) = LOWER(${citation.id})`,
-            });
-            if (!dbAgent) {
-              warnings.push(`Cited agent "${citation.id}" not found in database`);
-            }
-          }
-        }
-
-        if (citation.type === "topic" && citation.slug) {
-          const topicExists =
-            topTopicsList.some((t) => t.slug === citation.slug) ||
-            (await db.query.topics.findFirst({
-              where: eq(topics.slug, citation.slug!),
-            }));
-          if (!topicExists) {
-            warnings.push(`Cited topic "${citation.slug}" not found in database`);
-          }
-        }
-      }
-    }
-
-    // Validate that claimed metrics roughly match actual data
-    const metricsObj = (parsed as { metrics?: Record<string, { label: string; value: string }> }).metrics;
-    if (metricsObj) {
-      for (const [key, metric] of Object.entries(metricsObj)) {
-        if (
-          metric.label.toLowerCase().includes("autonomy") &&
-          metric.value
-        ) {
-          const claimed = parseFloat(metric.value);
-          const actual = Number(networkAvg[0]?.avgAutonomy) || 0;
-          if (!isNaN(claimed) && Math.abs(claimed - actual) > 0.15) {
-            warnings.push(
-              `Claimed autonomy (${claimed}) differs significantly from actual (${actual.toFixed(2)})`
-            );
-          }
-        }
-      }
-    }
-  }
-
-  if (warnings.length > 0) {
-    console.log(`[briefing] Validation warnings: ${warnings.join("; ")}`);
-  }
-
-  // Add validation warnings to the briefing content
-  let validatedContent = briefingContent;
-  if (warnings.length > 0 && parsed) {
-    const parsedCopy = JSON.parse(briefingContent);
-    parsedCopy._validationWarnings = warnings;
-    validatedContent = JSON.stringify(parsedCopy);
-  }
-
-  // Save narrative
   const [narrative] = await db
     .insert(narratives)
     .values({
-      type: "briefing_6h",
+      type: opts.type,
       title,
-      content: validatedContent,
+      content: briefingContent,
       summary,
       periodStart,
       periodEnd: now,

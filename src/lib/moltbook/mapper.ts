@@ -1,32 +1,20 @@
 import { MoltbookPost, MoltbookComment } from "./types";
+import { NormalizedAction } from "../sources/types";
 
-export interface NormalizedAction {
-  platformId: "moltbook";
-  platformActionId: string;
-  actionType: "post" | "comment" | "reply";
-  title: string | null;
-  content: string | null;
-  url: string | null;
-  upvotes: number;
-  downvotes: number;
-  replyCount: number;
-  performedAt: Date;
-  // Agent info (for upsert)
-  authorName: string;
-  authorDescription: string | null;
-  authorKarma: number | null;
-  // Community info
-  communityName: string | null;
-  communityDisplayName: string | null;
-  // Parent tracking
-  parentPlatformActionId: string | null;
-  // Raw data
-  rawData: Record<string, unknown>;
+interface MapperOptions {
+  sourceAdapterId?: string;
+  platformId?: string;
 }
 
-export function mapPost(post: MoltbookPost): NormalizedAction {
+export function mapPost(
+  post: MoltbookPost,
+  options: MapperOptions = {}
+): NormalizedAction {
+  const sourceAdapterId = options.sourceAdapterId ?? "moltbook";
+  const platformId = options.platformId ?? "moltbook";
   return {
-    platformId: "moltbook",
+    sourceAdapterId,
+    platformId,
     platformActionId: `post_${post.id}`,
     actionType: "post",
     title: post.title || null,
@@ -48,11 +36,15 @@ export function mapPost(post: MoltbookPost): NormalizedAction {
 
 export function mapComment(
   comment: MoltbookComment,
-  postId: string
+  postId: string,
+  options: MapperOptions = {}
 ): NormalizedAction {
   const isReply = !!comment.parent_id;
+  const sourceAdapterId = options.sourceAdapterId ?? "moltbook";
+  const platformId = options.platformId ?? "moltbook";
   return {
-    platformId: "moltbook",
+    sourceAdapterId,
+    platformId,
     platformActionId: `comment_${comment.id}`,
     actionType: isReply ? "reply" : "comment",
     title: null,

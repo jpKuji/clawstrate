@@ -12,6 +12,8 @@ interface BriefingSection {
   citations?: Array<{
     type: "agent" | "topic" | "action";
     id?: string;
+    agentId?: string;
+    label?: string;
     slug?: string;
     context?: string;
   }>;
@@ -47,7 +49,13 @@ function isStructuredBriefing(content: string): StructuredBriefing | null {
   return null;
 }
 
-export function BriefingReader({ content }: { content: string }) {
+export function BriefingReader({
+  content,
+  narrativeId,
+}: {
+  content: string;
+  narrativeId?: string;
+}) {
   const structured = isStructuredBriefing(content);
 
   if (!structured) {
@@ -59,10 +67,28 @@ export function BriefingReader({ content }: { content: string }) {
     );
   }
 
-  return <StructuredBriefingView briefing={structured} />;
+  return <StructuredBriefingView briefing={structured} narrativeId={narrativeId} />;
 }
 
-function StructuredBriefingView({ briefing }: { briefing: StructuredBriefing }) {
+function StructuredBriefingView({
+  briefing,
+  narrativeId,
+}: {
+  briefing: StructuredBriefing;
+  narrativeId?: string;
+}) {
+  const trackEvent = (eventType: string, metadata?: Record<string, unknown>) => {
+    void fetch("/api/v1/telemetry", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        eventType,
+        narrativeId,
+        metadata,
+      }),
+    });
+  };
+
   return (
     <div className="space-y-6">
       {/* Alerts */}
@@ -71,6 +97,8 @@ function StructuredBriefingView({ briefing }: { briefing: StructuredBriefing }) 
           {briefing.alerts.map((alert, i) => (
             <div
               key={i}
+              role="button"
+              tabIndex={0}
               className={`rounded-lg border p-3 text-sm ${
                 alert.level === "critical"
                   ? "border-red-800 bg-red-950/50 text-red-300"
@@ -78,6 +106,12 @@ function StructuredBriefingView({ briefing }: { briefing: StructuredBriefing }) 
                     ? "border-amber-800 bg-amber-950/50 text-amber-300"
                     : "border-blue-800 bg-blue-950/50 text-blue-300"
               }`}
+              onClick={() =>
+                trackEvent("alert_interaction", {
+                  level: alert.level,
+                  message: alert.message,
+                })
+              }
             >
               {alert.message}
             </div>
@@ -167,7 +201,7 @@ function CollapsibleSection({
               {section.citations.map((citation, j) => {
                 const href =
                   citation.type === "agent"
-                    ? `/agents/${encodeURIComponent(citation.id || "")}`
+                    ? `/agents/${encodeURIComponent(citation.agentId || citation.id || "")}`
                     : citation.type === "topic"
                       ? `/topics/${encodeURIComponent(citation.slug || "")}`
                       : null;
@@ -186,10 +220,12 @@ function CollapsibleSection({
                   >
                     {href ? (
                       <Link href={href}>
-                        {citation.type === "agent" ? `@${citation.id}` : `#${citation.slug}`}
+                        {citation.type === "agent"
+                          ? `@${citation.label || citation.id || citation.agentId}`
+                          : `#${citation.slug}`}
                       </Link>
                     ) : (
-                      <span>{citation.id || citation.slug}</span>
+                      <span>{citation.label || citation.id || citation.slug}</span>
                     )}
                   </Badge>
                 );

@@ -1,7 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { db } from "../db";
 import { actions, enrichments, topics, actionTopics } from "../db/schema";
-import { eq, and } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const BATCH_SIZE = 10;
@@ -203,25 +203,32 @@ export async function runEnrichment(): Promise<{
               .onConflictDoUpdate({
                 target: topics.slug,
                 set: {
+                  name: topicData.name,
                   lastSeenAt: action.performedAt,
-                  actionCount:
-                    (
-                      await db.query.topics.findFirst({
-                        where: eq(topics.slug, topicData.slug),
-                      })
-                    )?.actionCount ?? 0 + 1,
                 },
               })
               .returning();
 
-            await db
+            const insertedLinks = await db
               .insert(actionTopics)
               .values({
                 actionId: action.id,
                 topicId: topic.id,
                 relevance: topicData.relevance,
               })
-              .onConflictDoNothing();
+              .onConflictDoNothing()
+              .returning({ id: actionTopics.id });
+
+            // Increment topic actionCount only when we create a new action-topic edge.
+            if (insertedLinks.length > 0) {
+              await db
+                .update(topics)
+                .set({
+                  actionCount: sql`${topics.actionCount} + 1`,
+                  lastSeenAt: action.performedAt,
+                })
+                .where(eq(topics.id, topic.id));
+            }
           }
 
           // Mark action as enriched

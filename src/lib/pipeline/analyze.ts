@@ -24,15 +24,12 @@ export async function runAnalysis(): Promise<{
   const last7d = subHours(now, 168);
 
   // 1. Compute influence scores (PageRank-style)
-  const agentInfluence = await db
-    .select({
-      agentId: interactions.targetAgentId,
-      totalWeight: sql<number>`SUM(${interactions.weight})`.as("total_weight"),
-      interactionCount: count(interactions.id).as("interaction_count"),
-    })
-    .from(interactions)
-    .where(gte(interactions.createdAt, last7d))
-    .groupBy(interactions.targetAgentId);
+  // Include all agents active in last 7 days, even if they received no interactions.
+  const activeAgents = await db
+    .select({ agentId: actions.agentId })
+    .from(actions)
+    .where(gte(actions.performedAt, last7d))
+    .groupBy(actions.agentId);
 
   // Fetch all recent interactions for PageRank graph
   const recentInteractions = await db
@@ -44,6 +41,15 @@ export async function runAnalysis(): Promise<{
     })
     .from(interactions)
     .where(gte(interactions.createdAt, last7d));
+
+  const analyzableAgentIds = new Set<string>();
+  for (const row of activeAgents) {
+    if (row.agentId) analyzableAgentIds.add(row.agentId);
+  }
+  for (const inter of recentInteractions) {
+    analyzableAgentIds.add(inter.sourceAgentId);
+    analyzableAgentIds.add(inter.targetAgentId);
+  }
 
   // Fetch substantive action IDs to weight quality
   const substantiveActionIds = new Set(
@@ -83,7 +89,7 @@ export async function runAnalysis(): Promise<{
 
   const scores = new Map<string, number>();
   for (const id of agentIdsList) {
-    scores.set(id, 1 / n);
+    scores.set(id, 1 / Math.max(n, 1));
   }
 
   // Compute total outgoing weight per agent
@@ -97,24 +103,26 @@ export async function runAnalysis(): Promise<{
     );
   }
 
-  for (let iter = 0; iter < ITERATIONS; iter++) {
-    const newScores = new Map<string, number>();
+  if (n > 0) {
+    for (let iter = 0; iter < ITERATIONS; iter++) {
+      const newScores = new Map<string, number>();
 
-    for (const id of agentIdsList) {
-      let incomingSum = 0;
-      const edges = incomingEdges.get(id) || [];
+      for (const id of agentIdsList) {
+        let incomingSum = 0;
+        const edges = incomingEdges.get(id) || [];
 
-      for (const edge of edges) {
-        const senderScore = scores.get(edge.from) || 0;
-        const senderTotalOut = outgoingWeight.get(edge.from) || 1;
-        incomingSum += (senderScore * edge.weight) / senderTotalOut;
+        for (const edge of edges) {
+          const senderScore = scores.get(edge.from) || 0;
+          const senderTotalOut = outgoingWeight.get(edge.from) || 1;
+          incomingSum += (senderScore * edge.weight) / senderTotalOut;
+        }
+
+        newScores.set(id, (1 - DAMPING) / n + DAMPING * incomingSum);
       }
 
-      newScores.set(id, (1 - DAMPING) / n + DAMPING * incomingSum);
-    }
-
-    for (const [id, score] of newScores) {
-      scores.set(id, score);
+      for (const [id, score] of newScores) {
+        scores.set(id, score);
+      }
     }
   }
 
@@ -127,8 +135,8 @@ export async function runAnalysis(): Promise<{
 
   let agentsUpdated = 0;
 
-  for (const ai of agentInfluence) {
-    const influenceScore = normalizedScores.get(ai.agentId) || 0;
+  for (const agentId of analyzableAgentIds) {
+    const influenceScore = normalizedScores.get(agentId) || 0;
 
     // Get average autonomy score for this agent's actions
     const agentEnrichments = await db
@@ -137,7 +145,7 @@ export async function runAnalysis(): Promise<{
       })
       .from(enrichments)
       .innerJoin(actions, eq(enrichments.actionId, actions.id))
-      .where(eq(actions.agentId, ai.agentId));
+      .where(eq(actions.agentId, agentId));
 
     const autonomyScore = Number(agentEnrichments[0]?.avgAutonomy) || 0;
 
@@ -148,7 +156,7 @@ export async function runAnalysis(): Promise<{
         count: count(actions.id).as("count"),
       })
       .from(actions)
-      .where(eq(actions.agentId, ai.agentId))
+      .where(eq(actions.agentId, agentId))
       .groupBy(actions.actionType);
 
     const postCount =
@@ -165,7 +173,7 @@ export async function runAnalysis(): Promise<{
       .from(actions)
       .innerJoin(enrichments, eq(enrichments.actionId, actions.id))
       .where(
-        sql`${actions.agentId} = ${ai.agentId} AND ${actions.performedAt} >= ${last24h} AND ${enrichments.isSubstantive} = true`
+        sql`${actions.agentId} = ${agentId} AND ${actions.performedAt} >= ${last24h} AND ${enrichments.isSubstantive} = true`
       );
 
     const recentNonSubstantive = await db
@@ -173,7 +181,7 @@ export async function runAnalysis(): Promise<{
       .from(actions)
       .innerJoin(enrichments, eq(enrichments.actionId, actions.id))
       .where(
-        sql`${actions.agentId} = ${ai.agentId} AND ${actions.performedAt} >= ${last24h} AND (${enrichments.isSubstantive} = false OR ${enrichments.isSubstantive} IS NULL)`
+        sql`${actions.agentId} = ${agentId} AND ${actions.performedAt} >= ${last24h} AND (${enrichments.isSubstantive} = false OR ${enrichments.isSubstantive} IS NULL)`
       );
 
     // Also count unenriched recent actions (treat as 0.5 weight)
@@ -181,7 +189,7 @@ export async function runAnalysis(): Promise<{
       .select({ count: count(actions.id) })
       .from(actions)
       .where(
-        sql`${actions.agentId} = ${ai.agentId} AND ${actions.performedAt} >= ${last24h} AND ${actions.isEnriched} = false`
+        sql`${actions.agentId} = ${agentId} AND ${actions.performedAt} >= ${last24h} AND ${actions.isEnriched} = false`
       );
 
     const substantiveCount = Number(recentSubstantive[0]?.count) || 0;
@@ -209,7 +217,7 @@ export async function runAnalysis(): Promise<{
     else if (total >= 10 && total <= 20) {
       // Check if agent is "rising" (first seen within 7 days)
       const agentRecord = await db.query.agents.findFirst({
-        where: eq(agents.id, ai.agentId),
+        where: eq(agents.id, agentId),
       });
       if (agentRecord && (now.getTime() - new Date(agentRecord.firstSeenAt).getTime()) < 7 * 24 * 60 * 60 * 1000) {
         agentType = "rising";
@@ -225,11 +233,11 @@ export async function runAnalysis(): Promise<{
         activityScore,
         agentType,
       })
-      .where(eq(agents.id, ai.agentId));
+      .where(eq(agents.id, agentId));
 
     // Save profile snapshot
     await db.insert(agentProfiles).values({
-      agentId: ai.agentId,
+      agentId,
       influenceScore,
       autonomyScore,
       activityScore,

@@ -1,5 +1,6 @@
 import { PageContainer } from "@/components/layout/PageContainer";
 import { BriefingReader } from "@/components/briefings/BriefingReader";
+import { BriefingViewTracker } from "@/components/briefings/BriefingViewTracker";
 import { Badge } from "@/components/ui/badge";
 import { notFound } from "next/navigation";
 
@@ -30,6 +31,7 @@ export default async function BriefingPage({
 
   return (
     <PageContainer>
+      <BriefingViewTracker narrativeId={briefing.id} />
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-zinc-100">{briefing.title}</h1>
         <div className="flex gap-2 mt-2">
@@ -44,7 +46,7 @@ export default async function BriefingPage({
           </Badge>
         </div>
       </div>
-      <BriefingReader content={briefing.content} />
+      <BriefingReader content={briefing.content} narrativeId={briefing.id} />
     </PageContainer>
   );
 }
