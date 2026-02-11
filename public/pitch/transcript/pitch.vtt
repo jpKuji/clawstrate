@@ -1,0 +1,99 @@
+WEBVTT
+
+00:00.000 --> 00:09.280
+Right now, over 1 million AI agents are trading, forming communities on their own platforms,
+
+00:09.280 --> 00:12.460
+collaborating, buying services from each other.
+
+00:12.460 --> 00:15.880
+But nobody can tell you what they are doing.
+
+00:15.880 --> 00:23.760
+In January 2026, the AI agent economy exploded thanks to OpenClaw.
+
+00:23.760 --> 00:29.760
+Platforms like Moltbook have millions of agents communicating and debating with each other.
+
+00:29.760 --> 00:37.260
+There are platforms like ClawTask, where agents fulfill real bounties for real USTC, for real
+
+00:37.260 --> 00:38.760
+cash.
+
+00:38.760 --> 00:44.620
+And Ethereum not only introduced an identity layer for AI agents, but even connects with
+
+00:44.620 --> 00:49.240
+a new standard HTTP request with these identities.
+
+00:49.240 --> 00:51.460
+But still, the ecosystem is opaque.
+
+00:51.460 --> 00:56.980
+There are no analytics, no trends, and no intelligence layer.
+
+00:56.980 --> 00:58.660
+That's ClawStrate.
+
+00:58.660 --> 01:07.780
+Re-ingest the agentic behavior across platforms, enrich it with AI sentiment, intent, autonomy,
+
+01:07.780 --> 01:11.240
+and generate behavioral intelligence reports.
+
+01:11.240 --> 01:15.040
+Think of Bloomberg terminal, but for the agent economy.
+
+01:15.040 --> 01:17.700
+Who are the most influential agents?
+
+01:17.700 --> 01:19.940
+What topics are trending?
+
+01:19.940 --> 01:23.020
+Is the network becoming more autonomous?
+
+01:23.020 --> 01:25.020
+Let me answer that.
+
+01:25.020 --> 01:32.320
+We already have the MVP running, collecting data from Moltbook's API every 30 minutes.
+
+01:32.320 --> 01:36.680
+We have mapped over 20 agent platforms for integration.
+
+01:36.680 --> 01:38.720
+And here's the kicker.
+
+01:38.720 --> 01:43.260
+Every day we collect data is data our competitor will never have.
+
+01:43.260 --> 01:45.200
+The moat builds itself.
+
+01:45.200 --> 01:47.700
+Revenue comes from three layers.
+
+01:47.700 --> 01:52.320
+SaaS subscriptions for founders and investors that want to track the ecosystem.
+
+01:52.320 --> 01:55.680
+API access for AI agents.
+
+01:55.680 --> 01:59.320
+Agents paying for the intelligence themselves via micropayments.
+
+01:59.320 --> 02:06.660
+And long-term, we are sitting on the only behavioral AI agent dataset.
+
+02:06.660 --> 02:08.440
+This data is worth more than the SaaS.
+
+02:08.440 --> 02:16.000
+We're raising 25K pre-seed. That gives us twelve-plus months of runway to ship the Pro tier,
+build out cross-platform adapters, and sign our first design partners.
+
+02:16.000 --> 02:22.460
+If you're tracking the agent economy, let's talk.
+
