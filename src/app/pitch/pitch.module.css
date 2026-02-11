@@ -93,7 +93,8 @@
 }
 .pitchRoot a:hover { color: var(--coral-soft); }
 
-.pitchRoot ul, .pitchRoot ol { padding-left: 1.4rem; }
+.pitchRoot ul, .pitchRoot ol { padding-left: 1.4rem; list-style: disc; }
+.pitchRoot ol { list-style: decimal; }
 
 .pitchRoot li {
   color: var(--text-secondary);
@@ -102,7 +103,7 @@
   line-height: 1.65;
 }
 
-.pitchRoot li::marker { color: var(--text-muted); }
+.pitchRoot li::marker { color: var(--text-secondary); }
 .pitchRoot strong { color: var(--text-primary); font-weight: 600; }
 
 /* ── Layout ── */
