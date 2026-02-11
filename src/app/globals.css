@@ -84,6 +84,10 @@
 }
 
 .dark {
+  --panel-bg: #0c0c0f;
+  --accent-cyan: #00e5cc;
+  --accent-coral: #ff4d4d;
+  --gradient-accent: linear-gradient(135deg, #ff4d4d, #e63946 30%, #14b8a6 70%, #00e5cc);
   --background: oklch(0.145 0 0);
   --foreground: oklch(0.985 0 0);
   --card: oklch(0.205 0 0);
@@ -124,4 +128,13 @@
   body {
     @apply bg-background text-foreground;
   }
+}
+
+@layer utilities {
+  .font-data {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+  }
+  .text-accent { color: var(--accent-cyan); }
+  .bg-accent-gradient { background: var(--gradient-accent); }
 }

@@ -24,54 +24,57 @@ export function NavBar() {
   }
 
   return (
-    <nav className="sticky top-0 z-50 border-b border-zinc-800 bg-zinc-950/90 backdrop-blur-sm">
-      <div className="mx-auto flex h-14 max-w-7xl items-center justify-between px-4 md:px-6">
+    <nav className="sticky top-0 z-50 border-b border-zinc-800 bg-zinc-950">
+      <div className="flex h-10 items-center justify-between px-4">
         <Link
           href="/"
-          className="text-lg font-bold tracking-tight text-zinc-100"
+          className="font-data text-sm font-bold tracking-tight text-accent"
         >
-          CLAWSTRATE
+          &gt;_ CLAWSTRATE
         </Link>
 
         {/* Desktop links */}
-        <div className="hidden md:flex gap-1 text-sm">
+        <div className="hidden md:flex items-center gap-0.5">
           {NAV_LINKS.map((link) => (
             <Link
               key={link.href}
               href={link.href}
-              className={`rounded-md px-3 py-1.5 transition-colors ${
+              className={`relative px-3 py-2 text-[11px] font-semibold uppercase tracking-wider transition-colors ${
                 isActive(link.href)
-                  ? "bg-zinc-800/50 text-zinc-100"
-                  : "text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800/30"
+                  ? "text-zinc-100"
+                  : "text-zinc-500 hover:text-zinc-300"
               }`}
             >
               {link.label}
+              {isActive(link.href) && (
+                <span className="absolute inset-x-1 -bottom-px h-0.5 bg-accent-gradient" />
+              )}
             </Link>
           ))}
         </div>
 
         {/* Mobile hamburger */}
         <button
-          className="md:hidden p-2 text-zinc-400 hover:text-zinc-100 transition-colors"
+          className="md:hidden p-1.5 text-zinc-400 hover:text-zinc-100 transition-colors"
           onClick={() => setMobileOpen(!mobileOpen)}
           aria-label={mobileOpen ? "Close menu" : "Open menu"}
         >
-          {mobileOpen ? <X className="size-5" /> : <Menu className="size-5" />}
+          {mobileOpen ? <X className="size-4" /> : <Menu className="size-4" />}
         </button>
       </div>
 
       {/* Mobile dropdown */}
       {mobileOpen && (
-        <div className="md:hidden border-t border-zinc-800 bg-zinc-950/95 backdrop-blur-sm px-4 pb-3">
+        <div className="md:hidden border-t border-zinc-800 bg-zinc-950 px-4 pb-2">
           {NAV_LINKS.map((link) => (
             <Link
               key={link.href}
               href={link.href}
               onClick={() => setMobileOpen(false)}
-              className={`block rounded-md px-3 py-2.5 text-sm transition-colors ${
+              className={`block px-3 py-2 text-[11px] font-semibold uppercase tracking-wider transition-colors ${
                 isActive(link.href)
-                  ? "bg-zinc-800/50 text-zinc-100"
-                  : "text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800/30"
+                  ? "text-accent"
+                  : "text-zinc-500 hover:text-zinc-300"
               }`}
             >
               {link.label}

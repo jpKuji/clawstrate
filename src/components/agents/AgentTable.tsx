@@ -23,7 +23,7 @@ interface Agent {
 const typeColors: Record<string, string> = {
   content_creator: "border-emerald-800 text-emerald-400",
   commenter: "border-blue-800 text-blue-400",
-  active: "border-amber-800 text-amber-400",
+  active: "border-teal-800 text-teal-400",
   lurker: "border-zinc-700 text-zinc-400",
   bot_farm: "border-red-800 text-red-400",
 };

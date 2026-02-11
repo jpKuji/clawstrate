@@ -31,12 +31,24 @@ export interface StructuredBriefing {
 
 export function isStructuredBriefing(content: string): StructuredBriefing | null {
   try {
-    const parsed = JSON.parse(content);
-    if (parsed.sections && Array.isArray(parsed.sections)) {
-      return parsed;
+    let parsed = typeof content === "string" ? JSON.parse(content) : content;
+    // Handle double-encoding
+    if (typeof parsed === "string") {
+      parsed = JSON.parse(parsed);
+    }
+    if (parsed && typeof parsed === "object" && Array.isArray(parsed.sections)) {
+      return parsed as StructuredBriefing;
     }
   } catch {
-    // Not JSON — it's a legacy markdown briefing
+    // Try trimming BOM/whitespace
+    try {
+      const trimmed = (content as string).replace(/^\uFEFF/, "").trim();
+      let parsed = JSON.parse(trimmed);
+      if (typeof parsed === "string") parsed = JSON.parse(parsed);
+      if (parsed?.sections && Array.isArray(parsed.sections)) {
+        return parsed as StructuredBriefing;
+      }
+    } catch { /* not JSON */ }
   }
   return null;
 }

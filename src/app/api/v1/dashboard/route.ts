@@ -116,7 +116,7 @@ export async function GET(req?: NextRequest) {
     source === "all"
       ? db.query.topics.findMany({
           orderBy: (t, { desc }) => [desc(t.velocity)],
-          limit: 5,
+          limit: 10,
         })
       : (async () => {
           const filteredTopicIds = await db
@@ -134,7 +134,7 @@ export async function GET(req?: NextRequest) {
             )
             .groupBy(actionTopics.topicId)
             .orderBy(desc(count(actionTopics.id)))
-            .limit(5);
+            .limit(10);
 
           if (filteredTopicIds.length === 0) return [];
           const ids = filteredTopicIds.map((r) => r.topicId);
@@ -149,7 +149,7 @@ export async function GET(req?: NextRequest) {
     source === "all"
       ? db.query.agents.findMany({
           orderBy: (a, { desc }) => [desc(a.influenceScore)],
-          limit: 5,
+          limit: 10,
         })
       : db.query.agents.findMany({
           where: sql`EXISTS (
@@ -158,7 +158,7 @@ export async function GET(req?: NextRequest) {
               AND a.platform_id = ${source}
           )`,
           orderBy: (a, { desc }) => [desc(a.influenceScore)],
-          limit: 5,
+          limit: 10,
         }),
   ]);
 
@@ -206,6 +206,9 @@ export async function GET(req?: NextRequest) {
           title: latestBriefing.title,
           summary: latestBriefing.summary,
           generatedAt: latestBriefing.generatedAt,
+          actionsAnalyzed: latestBriefing.actionsAnalyzed,
+          agentsActive: latestBriefing.agentsActive,
+          content: latestBriefing.content,
         }
       : null,
     topTopics,
