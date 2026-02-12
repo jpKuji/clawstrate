@@ -1,4 +1,12 @@
+"use client";
+
 import type { SourceDisplayConfig } from "@/lib/sources/display";
+import {
+  TooltipProvider,
+  Tooltip,
+  TooltipTrigger,
+  TooltipContent,
+} from "@/components/ui/tooltip";
 
 interface SourceActivityItem {
   platformId: string;
@@ -29,14 +37,9 @@ export function SourceActivityStrip({
   const displayMap = new Map(sourceDisplayList.map((s) => [s.id, s]));
 
   return (
-    <div className="overflow-x-auto">
-      <div
-        className="grid gap-px bg-zinc-800"
-        style={{
-          gridTemplateColumns: `repeat(${sourceActivity.length}, minmax(200px, 1fr))`,
-        }}
-      >
-        {sourceActivity.map((item) => {
+    <TooltipProvider>
+      <div className="flex items-center border-b border-zinc-800 bg-zinc-950 px-4 py-1.5 overflow-x-auto">
+        {sourceActivity.map((item, i) => {
           const config = displayMap.get(item.platformId);
           const postLabel = config?.postLabel ?? "Posts";
           const commentLabel = config?.commentLabel ?? "Comments";
@@ -44,69 +47,56 @@ export function SourceActivityStrip({
           const displayName = config?.displayName ?? item.platformId;
 
           return (
-            <div
-              key={item.platformId}
-              className="bg-[var(--panel-bg)] px-3 py-2.5"
-            >
-              {/* Source header */}
-              <div className="flex items-center gap-1.5 mb-2">
+            <div key={item.platformId} className="flex items-center">
+              {i > 0 && <div className="h-3 w-px bg-zinc-700 mx-3 shrink-0" />}
+
+              <div className="flex items-center gap-1.5 shrink-0">
                 <span
-                  className={`size-2 rounded-full shrink-0 ${dotColor}`}
+                  className={`size-1.5 rounded-full shrink-0 ${dotColor}`}
                 />
-                <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
-                  {displayName}
+
+                {item.topOffering ? (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-400 cursor-default">
+                        {displayName}
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom">
+                      Top {postLabel.replace(/s$/, "")}:{" "}
+                      {item.topOffering.title} ({item.topOffering.replies})
+                    </TooltipContent>
+                  </Tooltip>
+                ) : (
+                  <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
+                    {displayName}
+                  </span>
+                )}
+
+                <span className="font-data text-[11px] text-zinc-300 ml-1">
+                  {item.posts.current.toLocaleString()}
+                </span>
+                <span className="text-[10px] text-zinc-500">{postLabel}</span>
+                <span className="text-[10px]">
+                  <ChangeDelta value={item.posts.change} />
+                </span>
+
+                <span className="text-zinc-600 mx-1">&middot;</span>
+
+                <span className="font-data text-[11px] text-zinc-300">
+                  {item.comments.current.toLocaleString()}
+                </span>
+                <span className="text-[10px] text-zinc-500">
+                  {commentLabel}
+                </span>
+                <span className="text-[10px]">
+                  <ChangeDelta value={item.comments.change} />
                 </span>
               </div>
-
-              {/* Metrics row */}
-              <div className="flex items-baseline gap-4 mb-1.5">
-                <div>
-                  <span className="font-data text-sm text-zinc-200">
-                    {item.posts.current.toLocaleString()}
-                  </span>
-                  <span className="text-[10px] text-zinc-500 ml-1">
-                    {postLabel}
-                  </span>
-                  <span className="text-[10px] ml-1">
-                    <ChangeDelta value={item.posts.change} />
-                  </span>
-                </div>
-                <div>
-                  <span className="font-data text-sm text-zinc-200">
-                    {item.comments.current.toLocaleString()}
-                  </span>
-                  <span className="text-[10px] text-zinc-500 ml-1">
-                    {commentLabel}
-                  </span>
-                  <span className="text-[10px] ml-1">
-                    <ChangeDelta value={item.comments.change} />
-                  </span>
-                </div>
-              </div>
-
-              {/* Top offering */}
-              {item.topOffering && (
-                <div className="text-[10px] text-zinc-500 truncate">
-                  <span className="text-zinc-600">
-                    Top {postLabel.replace(/s$/, "")}:
-                  </span>{" "}
-                  <a
-                    href={item.topOffering.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-zinc-400 hover:text-accent transition-colors"
-                  >
-                    {item.topOffering.title}
-                  </a>
-                  <span className="text-zinc-600 ml-1">
-                    ({item.topOffering.replies})
-                  </span>
-                </div>
-              )}
             </div>
           );
         })}
       </div>
-    </div>
+    </TooltipProvider>
   );
 }
