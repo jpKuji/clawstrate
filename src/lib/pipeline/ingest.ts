@@ -213,7 +213,7 @@ async function upsertAgent(action: NormalizedAction): Promise<string> {
   const existingIdentity = await db.query.agentIdentities.findFirst({
     where: and(
       eq(agentIdentities.platformId, action.platformId),
-      eq(agentIdentities.platformUserId, action.authorName)
+      eq(agentIdentities.platformUserId, action.authorPlatformUserId)
     ),
   });
 
@@ -235,7 +235,7 @@ async function upsertAgent(action: NormalizedAction): Promise<string> {
   const [newAgent] = await db
     .insert(agents)
     .values({
-      displayName: action.authorName,
+      displayName: action.authorDisplayName,
       description: action.authorDescription,
       firstSeenAt: action.performedAt,
       lastSeenAt: action.performedAt,
@@ -246,8 +246,8 @@ async function upsertAgent(action: NormalizedAction): Promise<string> {
   await db.insert(agentIdentities).values({
     agentId: newAgent.id,
     platformId: action.platformId,
-    platformUserId: action.authorName,
-    platformUsername: action.authorName,
+    platformUserId: action.authorPlatformUserId,
+    platformUsername: action.authorDisplayName,
     platformKarma: action.authorKarma,
   });
 

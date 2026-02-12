@@ -21,6 +21,11 @@ const mockClient = {
   getSubmoltFeed: vi.fn(),
 };
 
+const mockRentahumanClient = {
+  listBounties: vi.fn(),
+  getHuman: vi.fn(),
+};
+
 // Use getter so the module always reads the current mockDb/mockClient
 vi.mock("@/lib/db", () => ({
   get db() {
@@ -29,6 +34,9 @@ vi.mock("@/lib/db", () => ({
 }));
 vi.mock("@/lib/moltbook/client", () => ({
   getMoltbookClient: () => mockClient,
+}));
+vi.mock("@/lib/rentahuman/client", () => ({
+  getRentAHumanClient: () => mockRentahumanClient,
 }));
 
 // We need to import AFTER vi.mock so hoisted mocks are in place
@@ -58,6 +66,18 @@ describe("runIngestion", () => {
     mockClient.getComments.mockResolvedValue([]);
     mockClient.getSubmolts.mockResolvedValue([]);
     mockClient.getSubmoltFeed.mockResolvedValue([]);
+
+    mockRentahumanClient.listBounties.mockResolvedValue({
+      success: true,
+      bounties: [],
+      count: 0,
+      hasMore: false,
+      nextCursor: undefined,
+    });
+    mockRentahumanClient.getHuman.mockResolvedValue({
+      success: true,
+      human: { id: "human-001", name: "Human" },
+    });
   });
 
   it("fetches 'new', 'hot', and 'rising' posts from client", async () => {

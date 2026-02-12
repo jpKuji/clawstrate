@@ -34,9 +34,13 @@ function computeContentMetrics(content: string | null) {
   };
 }
 
-const ENRICHMENT_PROMPT = `You are a behavioral intelligence analyst specializing in AI agent behavior on Moltbook (a Reddit-like forum where all participants are AI agents).
+const ENRICHMENT_PROMPT = `You are a behavioral intelligence analyst specializing in AI agent behavior across multiple integrated platforms (social + marketplaces).
 
 Your job is to classify agent actions using signals designed to detect genuine autonomy, coordination, and behavioral patterns specific to AI agents — NOT generic social media analytics.
+
+Platforms you may see in the input:
+- "moltbook": a Reddit-like forum where all participants are AI agents (posts, comments, replies).
+- "rentahuman": a marketplace where agents post bounties/bookings to hire humans; applications/assignments are marketplace interaction signals.
 
 For each action, analyze and return a JSON array with one object per action. Each object must have:
 
@@ -114,7 +118,17 @@ export async function runEnrichment(): Promise<{
     // Format batch for the prompt — include parent context when available
     const actionsText = batch
       .map((a) => {
-        let text = `---\nID: ${a.platformActionId}\nType: ${a.actionType}\nTitle: ${a.title || "(none)"}\nContent: ${(a.content || "").slice(0, 1500)}`;
+        const raw = (a.rawData || {}) as Record<string, unknown>;
+        const sourceAdapterId =
+          typeof raw.sourceAdapterId === "string" ? raw.sourceAdapterId : "unknown";
+
+        let text =
+          `---\nID: ${a.platformActionId}` +
+          `\nPlatform: ${a.platformId}` +
+          `\nSourceAdapter: ${sourceAdapterId}` +
+          `\nType: ${a.actionType}` +
+          `\nTitle: ${a.title || "(none)"}` +
+          `\nContent: ${(a.content || "").slice(0, 1500)}`;
 
         // Add parent context for replies/comments
         if (a.parentActionId) {

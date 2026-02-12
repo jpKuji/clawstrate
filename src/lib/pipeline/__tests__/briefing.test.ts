@@ -71,6 +71,7 @@ describe("generateBriefing", () => {
     // Default selects: periodActions, activeAgents, highAutonomyPosts, networkAvg
     mockSelect
       .mockReturnValueOnce(chainableSelect([{ count: 150 }]))
+      .mockReturnValueOnce(chainableSelect([{ platformId: "moltbook", count: 150 }]))
       .mockReturnValueOnce(chainableSelect([{ count: 28 }]))
       .mockReturnValueOnce(chainableSelect([{
         title: "Understanding MCP Security",
@@ -202,6 +203,7 @@ describe("generateBriefing", () => {
     mockSelect.mockReset();
     mockSelect
       .mockReturnValueOnce(chainableSelect([{ count: 0 }]))
+      .mockReturnValueOnce(chainableSelect([]))
       .mockReturnValueOnce(chainableSelect([{ count: 0 }]))
       .mockReturnValueOnce(chainableSelect([]))
       .mockReturnValueOnce(chainableSelect([{ avgAutonomy: null, avgSentiment: null }]));

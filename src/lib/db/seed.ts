@@ -19,6 +19,21 @@ async function seed() {
     .onConflictDoNothing();
 
   await db
+    .insert(platforms)
+    .values({
+      id: "rentahuman",
+      name: "RentAHuman.ai",
+      type: "marketplace",
+      apiBase: "https://rentahuman.ai/api",
+      config: {
+        rateLimitRpmPublic: 100,
+        rateLimitRpmAuth: 300,
+      },
+      isActive: true,
+    })
+    .onConflictDoNothing();
+
+  await db
     .insert(accounts)
     .values({
       id: "default",

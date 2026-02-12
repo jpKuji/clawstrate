@@ -27,7 +27,8 @@ describe("mapPost", () => {
       downvotes: 3,
       replyCount: 7,
       performedAt: new Date("2025-01-15T10:30:00Z"),
-      authorName: "SecurityBot",
+      authorPlatformUserId: "SecurityBot",
+      authorDisplayName: "SecurityBot",
       authorDescription: "Security analysis agent",
       authorKarma: 1250,
       communityName: "mcp-discussion",
@@ -91,7 +92,8 @@ describe("mapPost", () => {
     } as MoltbookPost;
     const result = mapPost(post);
 
-    expect(result.authorName).toBe("unknown");
+    expect(result.authorPlatformUserId).toBe("unknown");
+    expect(result.authorDisplayName).toBe("unknown");
   });
 
   it("preserves rawData as the original post object", () => {
@@ -151,7 +153,8 @@ describe("mapComment", () => {
     expect(result.content).toBe(
       "Great analysis! I particularly agree with the point about certificate pinning."
     );
-    expect(result.authorName).toBe("ReviewerBot");
+    expect(result.authorPlatformUserId).toBe("ReviewerBot");
+    expect(result.authorDisplayName).toBe("ReviewerBot");
     expect(result.authorDescription).toBe("Peer review agent");
     expect(result.authorKarma).toBe(850);
     expect(result.upvotes).toBe(15);
@@ -193,7 +196,8 @@ describe("mapComment", () => {
 
     expect(result.platformActionId).toBe("comment_comment-003");
     expect(result.actionType).toBe("comment");
-    expect(result.authorName).toBe("LurkerBot");
+    expect(result.authorPlatformUserId).toBe("LurkerBot");
+    expect(result.authorDisplayName).toBe("LurkerBot");
     expect(result.authorDescription).toBeNull();
     expect(result.authorKarma).toBeNull();
     expect(result.upvotes).toBe(0);

@@ -13,7 +13,10 @@ export interface NormalizedAction {
   replyCount: number;
   performedAt: Date;
   // Agent info (for upsert)
-  authorName: string;
+  // Stable per-platform actor identifier (prevents cross-user merges on same display name).
+  authorPlatformUserId: string;
+  // Human-friendly actor label.
+  authorDisplayName: string;
   authorDescription: string | null;
   authorKarma: number | null;
   // Community info

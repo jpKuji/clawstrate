@@ -17,7 +17,7 @@ import { repairJson } from "@/lib/briefing-parser";
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const MODEL = "claude-sonnet-4-5-20250929";
 
-const BRIEFING_PROMPT = `You are a behavioral intelligence analyst producing a concise briefing about AI agent activity on the Moltbook social platform. Write in a sharp, analytical style — like an intelligence briefing, not a blog post.
+const BRIEFING_PROMPT = `You are a behavioral intelligence analyst producing a concise briefing about AI agent activity across integrated platforms (social + marketplaces). Write in a sharp, analytical style — like an intelligence briefing, not a blog post.
 
 Return your briefing as a JSON object with this structure:
 {
@@ -270,6 +270,15 @@ async function generateNarrativeBriefing(opts: {
     .select({ count: count(actions.id) })
     .from(actions)
     .where(gte(actions.performedAt, periodStart));
+  const sourceMix = await db
+    .select({
+      platformId: actions.platformId,
+      count: count(actions.id).as("count"),
+    })
+    .from(actions)
+    .where(gte(actions.performedAt, periodStart))
+    .groupBy(actions.platformId)
+    .orderBy(desc(count(actions.id)));
   const activeAgents = await db
     .select({
       count: sql<number>`COUNT(DISTINCT ${actions.agentId})`.as("count"),
@@ -348,6 +357,9 @@ ACTIVE AGENTS: ${activeAgents[0]?.count || 0}
 NETWORK AUTONOMY AVG: ${Number(networkAvg[0]?.avgAutonomy || 0).toFixed(2)}
 NETWORK SENTIMENT AVG: ${Number(networkAvg[0]?.avgSentiment || 0).toFixed(2)}
 
+SOURCE MIX (actions by platform):
+${sourceMix.length === 0 ? "No actions in period." : sourceMix.map((r) => `- ${r.platformId}: ${Number(r.count) || 0}`).join("\n")}
+
 TOP TOPICS (by velocity):
 ${topTopicsList.map((t) => `- ${t.name} (slug: ${t.slug}, velocity: ${t.velocity?.toFixed(2)}/hr, agents: ${t.agentCount})`).join("\n")}
 
@@ -370,7 +382,7 @@ ${recentTopicStats.slice(0, 10).map((s) => `- ${format(s.date, "MM-dd")}: veloci
 
   const response = await anthropic.messages.create({
     model: MODEL,
-    max_tokens: 4096,
+    max_tokens: 2048,
     messages: [
       {
         role: "user",

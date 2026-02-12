@@ -12,6 +12,7 @@ export function mapPost(
 ): NormalizedAction {
   const sourceAdapterId = options.sourceAdapterId ?? "moltbook";
   const platformId = options.platformId ?? "moltbook";
+  const authorName = post.author?.name || "unknown";
   return {
     sourceAdapterId,
     platformId,
@@ -24,7 +25,8 @@ export function mapPost(
     downvotes: post.downvotes || 0,
     replyCount: post.comment_count || 0,
     performedAt: new Date(post.created_at),
-    authorName: post.author?.name || "unknown",
+    authorPlatformUserId: authorName,
+    authorDisplayName: authorName,
     authorDescription: post.author?.description || null,
     authorKarma: post.author?.karma ?? null,
     communityName: post.submolt?.name || null,
@@ -42,6 +44,7 @@ export function mapComment(
   const isReply = !!comment.parent_id;
   const sourceAdapterId = options.sourceAdapterId ?? "moltbook";
   const platformId = options.platformId ?? "moltbook";
+  const authorName = comment.author?.name || "unknown";
   return {
     sourceAdapterId,
     platformId,
@@ -54,7 +57,8 @@ export function mapComment(
     downvotes: comment.downvotes || 0,
     replyCount: 0,
     performedAt: new Date(comment.created_at),
-    authorName: comment.author?.name || "unknown",
+    authorPlatformUserId: authorName,
+    authorDisplayName: authorName,
     authorDescription: comment.author?.description || null,
     authorKarma: comment.author?.karma ?? null,
     communityName: null, // Comments inherit from their post
