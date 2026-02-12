@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { agents, agentIdentities } from "@/lib/db/schema";
-import { desc, asc, eq, sql } from "drizzle-orm";
+import { desc, asc, eq, sql, inArray } from "drizzle-orm";
 import { cacheGet, cacheSet } from "@/lib/redis";
 
 export async function GET(req: NextRequest) {
@@ -42,8 +42,33 @@ export async function GET(req: NextRequest) {
     limit,
   });
 
-  // Cache for 60 seconds
-  await cacheSet(cacheKey, results, 60);
+  // Batch-fetch platform identities for all returned agents
+  const agentIds = results.map((a) => a.id);
+  const identities =
+    agentIds.length > 0
+      ? await db
+          .select({
+            agentId: agentIdentities.agentId,
+            platformId: agentIdentities.platformId,
+          })
+          .from(agentIdentities)
+          .where(inArray(agentIdentities.agentId, agentIds))
+      : [];
 
-  return NextResponse.json(results);
+  const platformMap = new Map<string, string[]>();
+  for (const row of identities) {
+    const list = platformMap.get(row.agentId) || [];
+    list.push(row.platformId);
+    platformMap.set(row.agentId, list);
+  }
+
+  const enrichedResults = results.map((a) => ({
+    ...a,
+    platformIds: platformMap.get(a.id) || [],
+  }));
+
+  // Cache for 60 seconds
+  await cacheSet(cacheKey, enrichedResults, 60);
+
+  return NextResponse.json(enrichedResults);
 }

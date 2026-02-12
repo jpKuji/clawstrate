@@ -1,4 +1,6 @@
 import Link from "next/link";
+import { SourceDot } from "@/components/shared/SourceBadge";
+import type { SourceDisplayConfig } from "@/lib/sources/display";
 
 interface Agent {
   id: string;
@@ -6,6 +8,7 @@ interface Agent {
   influenceScore: number | null;
   autonomyScore: number | null;
   agentType: string | null;
+  platformIds?: string[];
 }
 
 const typeColors: Record<string, string> = {
@@ -18,7 +21,13 @@ const typeColors: Record<string, string> = {
   lurker: "bg-zinc-600",
 };
 
-export function DashboardAgentTable({ agents }: { agents: Agent[] }) {
+export function DashboardAgentTable({
+  agents,
+  sourceDisplayList,
+}: {
+  agents: Agent[];
+  sourceDisplayList?: SourceDisplayConfig[];
+}) {
   const maxInfluence = Math.max(
     ...agents.map((a) => a.influenceScore ?? 0),
     0.01
@@ -50,12 +59,19 @@ export function DashboardAgentTable({ agents }: { agents: Agent[] }) {
             <span className="font-data text-[11px] text-zinc-600">
               {i + 1}
             </span>
-            <Link
-              href={`/agents/${agent.id}`}
-              className="text-zinc-200 hover:text-accent transition-colors truncate font-medium text-[12px]"
-            >
-              {agent.displayName}
-            </Link>
+            <div className="flex items-center gap-1.5 min-w-0">
+              <Link
+                href={`/agents/${agent.id}`}
+                className="text-zinc-200 hover:text-accent transition-colors truncate font-medium text-[12px]"
+              >
+                {agent.displayName}
+              </Link>
+              <div className="flex items-center gap-0.5 shrink-0">
+                {(agent.platformIds ?? []).map((pid) => (
+                  <SourceDot key={pid} sourceId={pid} />
+                ))}
+              </div>
+            </div>
             <span
               className={`text-[10px] text-zinc-500 truncate`}
             >

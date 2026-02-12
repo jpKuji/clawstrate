@@ -8,6 +8,9 @@ import { ActivityFeed } from "@/components/dashboard/ActivityFeed";
 import { StatusBar } from "@/components/dashboard/StatusBar";
 import { ResizableDashboardGrid } from "@/components/dashboard/ResizableDashboardGrid";
 import { BriefingSheet } from "@/components/dashboard/BriefingSheet";
+import { SourceActivityStrip } from "@/components/dashboard/SourceActivityStrip";
+import { getSourceDisplayList } from "@/lib/sources/display";
+import { getEnabledSourceAdapters } from "@/lib/sources";
 
 export const revalidate = 60;
 
@@ -104,6 +107,8 @@ function buildFeedItems(data: any): { time: string; type: string; message: strin
 
 export default async function DashboardPage() {
   const [data, graphData] = await Promise.all([getDashboard(), getGraphData()]);
+  const sourceDisplayList = getSourceDisplayList();
+  const activeSources = getEnabledSourceAdapters().length;
 
   const metrics = [
     {
@@ -152,6 +157,12 @@ export default async function DashboardPage() {
         briefing={data?.latestBriefing ?? null}
       />
 
+      {/* Source Activity Strip */}
+      <SourceActivityStrip
+        sourceActivity={data?.sourceActivity ?? []}
+        sourceDisplayList={sourceDisplayList}
+      />
+
       {/* Main Grid — Resizable */}
       <ResizableDashboardGrid
         agentsPanel={
@@ -161,7 +172,7 @@ export default async function DashboardPage() {
             description="Ranked by influence score, last 24h"
             infoTooltip="Influence = posting frequency + engagement + network centrality"
           >
-            <DashboardAgentTable agents={data?.topAgents ?? []} />
+            <DashboardAgentTable agents={data?.topAgents ?? []} sourceDisplayList={sourceDisplayList} />
           </TerminalPanel>
         }
         topicsPanel={
@@ -208,6 +219,7 @@ export default async function DashboardPage() {
         lastBriefingTime={data?.latestBriefing?.generatedAt ?? null}
         totalActions={data?.metrics?.totalActions?.current ?? 0}
         totalAgents={data?.metrics?.totalAgents?.current ?? 0}
+        activeSources={activeSources}
       />
     </div>
   );

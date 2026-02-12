@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { actions, agents, topics, enrichments, actionTopics } from "@/lib/db/schema";
+import { actions, agents, topics, enrichments, actionTopics, agentIdentities } from "@/lib/db/schema";
 import { count, avg, gte, and, lt, eq, sql, inArray, desc } from "drizzle-orm";
 import { subHours } from "date-fns";
 import { cacheGet, cacheSet } from "@/lib/redis";
@@ -36,6 +36,9 @@ export async function GET(req?: NextRequest) {
     latestBriefing,
     topTopics,
     topAgents,
+    currentSourceCounts,
+    previousSourceCounts,
+    topOfferings,
   ] = await Promise.all([
     source === "all"
       ? db.select({ count: count(actions.id) }).from(actions)
@@ -160,6 +163,44 @@ export async function GET(req?: NextRequest) {
           orderBy: (a, { desc }) => [desc(a.influenceScore)],
           limit: 10,
         }),
+    // sourceActivity: per-platform action counts (current 24h)
+    source === "all"
+      ? db
+          .select({
+            platformId: actions.platformId,
+            actionType: actions.actionType,
+            cnt: count(actions.id),
+          })
+          .from(actions)
+          .where(gte(actions.performedAt, last24h))
+          .groupBy(actions.platformId, actions.actionType)
+      : Promise.resolve([]),
+    // sourceActivity: per-platform action counts (previous 24h)
+    source === "all"
+      ? db
+          .select({
+            platformId: actions.platformId,
+            actionType: actions.actionType,
+            cnt: count(actions.id),
+          })
+          .from(actions)
+          .where(
+            and(
+              gte(actions.performedAt, last48h),
+              lt(actions.performedAt, last24h)
+            )
+          )
+          .groupBy(actions.platformId, actions.actionType)
+      : Promise.resolve([]),
+    // sourceActivity: top offering per platform (hottest post in last 24h)
+    source === "all"
+      ? db.execute(sql`
+          SELECT DISTINCT ON (platform_id) platform_id, title, reply_count, url
+          FROM actions
+          WHERE action_type = 'post' AND performed_at >= ${last24h}
+          ORDER BY platform_id, reply_count DESC
+        `)
+      : Promise.resolve({ rows: [] }),
   ]);
 
   const currentTotalActions = totalActions[0]?.count || 0;
@@ -171,6 +212,97 @@ export async function GET(req?: NextRequest) {
   const currentSentiment = Number(networkStats[0]?.avgSentiment || 0);
   const prevAutonomy = Number(previousNetworkStats[0]?.avgAutonomy || 0);
   const prevSentiment = Number(previousNetworkStats[0]?.avgSentiment || 0);
+
+  // Build sourceActivity from the 3 new queries
+  let sourceActivity: Array<{
+    platformId: string;
+    posts: { current: number; change: number };
+    comments: { current: number; change: number };
+    topOffering: { title: string; replies: number; url: string } | null;
+  }> = [];
+
+  if (source === "all") {
+    // Aggregate current counts by platform
+    const currentMap = new Map<string, { posts: number; comments: number }>();
+    for (const row of currentSourceCounts) {
+      const pid = row.platformId;
+      if (!currentMap.has(pid)) currentMap.set(pid, { posts: 0, comments: 0 });
+      const entry = currentMap.get(pid)!;
+      if (row.actionType === "post") entry.posts = Number(row.cnt);
+      else if (row.actionType === "comment" || row.actionType === "reply")
+        entry.comments += Number(row.cnt);
+    }
+
+    // Aggregate previous counts by platform
+    const previousMap = new Map<string, { posts: number; comments: number }>();
+    for (const row of previousSourceCounts) {
+      const pid = row.platformId;
+      if (!previousMap.has(pid)) previousMap.set(pid, { posts: 0, comments: 0 });
+      const entry = previousMap.get(pid)!;
+      if (row.actionType === "post") entry.posts = Number(row.cnt);
+      else if (row.actionType === "comment" || row.actionType === "reply")
+        entry.comments += Number(row.cnt);
+    }
+
+    // Build top offerings map
+    const offeringRows = "rows" in topOfferings ? topOfferings.rows : topOfferings;
+    const offeringsMap = new Map<
+      string,
+      { title: string; replies: number; url: string }
+    >();
+    for (const row of offeringRows as Array<{
+      platform_id: string;
+      title: string | null;
+      reply_count: number | null;
+      url: string | null;
+    }>) {
+      offeringsMap.set(row.platform_id, {
+        title: row.title || "",
+        replies: Number(row.reply_count || 0),
+        url: row.url || "",
+      });
+    }
+
+    // Collect all platform IDs across current and previous
+    const allPlatformIds = new Set([
+      ...currentMap.keys(),
+      ...previousMap.keys(),
+    ]);
+
+    sourceActivity = Array.from(allPlatformIds).map((pid) => {
+      const cur = currentMap.get(pid) || { posts: 0, comments: 0 };
+      const prev = previousMap.get(pid) || { posts: 0, comments: 0 };
+      return {
+        platformId: pid,
+        posts: { current: cur.posts, change: cur.posts - prev.posts },
+        comments: {
+          current: cur.comments,
+          change: cur.comments - prev.comments,
+        },
+        topOffering: offeringsMap.get(pid) || null,
+      };
+    });
+  }
+
+  // Batch-query platformIds for topAgents
+  const agentIds = topAgents.map((a) => a.id);
+  const identities =
+    agentIds.length > 0
+      ? await db
+          .select({
+            agentId: agentIdentities.agentId,
+            platformId: agentIdentities.platformId,
+          })
+          .from(agentIdentities)
+          .where(inArray(agentIdentities.agentId, agentIds))
+      : [];
+
+  const platformMap = new Map<string, string[]>();
+  for (const row of identities) {
+    const list = platformMap.get(row.agentId) || [];
+    list.push(row.platformId);
+    platformMap.set(row.agentId, list);
+  }
 
   const response = {
     metrics: {
@@ -218,7 +350,9 @@ export async function GET(req?: NextRequest) {
       influenceScore: a.influenceScore,
       autonomyScore: a.autonomyScore,
       agentType: a.agentType,
+      platformIds: platformMap.get(a.id) || [],
     })),
+    sourceActivity,
   };
 
   // Cache for 60 seconds

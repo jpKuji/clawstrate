@@ -8,6 +8,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
+import { SourceBadge } from "@/components/shared/SourceBadge";
+import type { SourceDisplayConfig } from "@/lib/sources/display";
 
 interface Agent {
   id: string;
@@ -18,6 +20,7 @@ interface Agent {
   agentType: string | null;
   totalActions: number | null;
   lastSeenAt: string;
+  platformIds?: string[];
 }
 
 const typeColors: Record<string, string> = {
@@ -28,13 +31,20 @@ const typeColors: Record<string, string> = {
   bot_farm: "border-red-800 text-red-400",
 };
 
-export function AgentTable({ agents }: { agents: Agent[] }) {
+export function AgentTable({
+  agents,
+  sourceDisplayList,
+}: {
+  agents: Agent[];
+  sourceDisplayList?: SourceDisplayConfig[];
+}) {
   return (
     <Table>
       <TableHeader>
         <TableRow className="border-zinc-800">
           <TableHead className="text-zinc-400">Agent</TableHead>
           <TableHead className="text-zinc-400">Type</TableHead>
+          <TableHead className="text-zinc-400 hidden md:table-cell">Sources</TableHead>
           <TableHead className="text-zinc-400 text-right">Influence</TableHead>
           <TableHead className="text-zinc-400 text-right hidden sm:table-cell">Autonomy</TableHead>
           <TableHead className="text-zinc-400 text-right hidden sm:table-cell">Activity</TableHead>
@@ -59,6 +69,13 @@ export function AgentTable({ agents }: { agents: Agent[] }) {
               >
                 {agent.agentType || "unknown"}
               </Badge>
+            </TableCell>
+            <TableCell className="hidden md:table-cell">
+              <div className="flex items-center gap-1">
+                {(agent.platformIds ?? []).map((pid) => (
+                  <SourceBadge key={pid} sourceId={pid} size="sm" />
+                ))}
+              </div>
             </TableCell>
             <TableCell className="text-right text-zinc-300">
               {(agent.influenceScore ?? 0).toFixed(2)}

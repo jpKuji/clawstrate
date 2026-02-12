@@ -5,6 +5,7 @@ import { NetworkGraph } from "@/components/dashboard/NetworkGraph";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { GraphApiResponse, GraphColorMode } from "@/lib/network/types";
+import { formatSourceLabel } from "@/lib/sources/display";
 
 const WINDOW_OPTIONS = [7, 14, 30, 60] as const;
 const MAX_NODE_OPTIONS = [30, 50, 80, 120] as const;
@@ -21,15 +22,6 @@ const EMPTY_DATA: GraphApiResponse = {
     totalEdges: 0,
   },
 };
-
-function formatSourceLabel(source: string): string {
-  if (source === "all") return "All sources";
-  return source
-    .split(/[_-]/)
-    .filter(Boolean)
-    .map((segment) => segment[0]?.toUpperCase() + segment.slice(1))
-    .join(" ");
-}
 
 export function NetworkExplorer({
   initialData,
