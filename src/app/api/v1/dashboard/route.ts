@@ -203,11 +203,12 @@ export async function GET(req?: NextRequest) {
       : Promise.resolve({ rows: [] }),
   ]);
 
-  const currentTotalActions = totalActions[0]?.count || 0;
-  const currentTotalAgents = totalAgents[0]?.count || 0;
-  const currentActionsLast24h = recentActions[0]?.count || 0;
-  const prevActionsLast24h = previousActions[0]?.count || 0;
-  const prevTotalAgents = previousAgents[0]?.count || 0;
+  // Drizzle/Neon can return COUNT() as bigint; normalize to number for arithmetic + JSON serialization.
+  const currentTotalActions = Number(totalActions[0]?.count ?? 0) || 0;
+  const currentTotalAgents = Number(totalAgents[0]?.count ?? 0) || 0;
+  const currentActionsLast24h = Number(recentActions[0]?.count ?? 0) || 0;
+  const prevActionsLast24h = Number(previousActions[0]?.count ?? 0) || 0;
+  const prevTotalAgents = Number(previousAgents[0]?.count ?? 0) || 0;
   const currentAutonomy = Number(networkStats[0]?.avgAutonomy || 0);
   const currentSentiment = Number(networkStats[0]?.avgSentiment || 0);
   const prevAutonomy = Number(previousNetworkStats[0]?.avgAutonomy || 0);
