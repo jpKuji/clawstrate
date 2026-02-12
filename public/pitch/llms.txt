@@ -6,8 +6,7 @@
 - [/pitch/transcript.md] : Full video transcript (edited)
 
 ## Media
-- [/pitch/video/pitch.mp4] : Pitch video
-- [/pitch/transcript/pitch.vtt] : Captions
+- [/pitch/video/pitch.mp4] : Pitch video (subtitles embedded)
 - [/pitch/deck.pdf] : Pitch deck (optional)
 
 ## Contract
