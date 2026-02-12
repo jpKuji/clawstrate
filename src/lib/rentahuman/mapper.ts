@@ -47,6 +47,7 @@ export function mapBountyToPost(
     communityDisplayName: bounty.category ?? null,
     parentPlatformActionId: null,
     rawData: { kind: "bounty", ...(bounty as unknown as Record<string, unknown>) },
+    actorKind: "ai",
   };
 }
 
@@ -86,5 +87,6 @@ export function mapAssignmentToComment(
       humanId,
       bookingIds: bounty.bookingIds ?? [],
     },
+    actorKind: "human",
   };
 }

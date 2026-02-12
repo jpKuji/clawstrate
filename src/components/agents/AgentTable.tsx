@@ -9,6 +9,7 @@ import {
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { SourceBadge } from "@/components/shared/SourceBadge";
+import { ActorKindBadge } from "@/components/shared/ActorKindBadge";
 import type { SourceDisplayConfig } from "@/lib/sources/display";
 
 interface Agent {
@@ -21,6 +22,7 @@ interface Agent {
   totalActions: number | null;
   lastSeenAt: string;
   platformIds?: string[];
+  actorKind?: string;
 }
 
 const typeColors: Record<string, string> = {
@@ -55,12 +57,15 @@ export function AgentTable({
         {agents.map((agent) => (
           <TableRow key={agent.id} className="border-zinc-800">
             <TableCell>
-              <Link
-                href={`/agents/${agent.id}`}
-                className="text-zinc-100 hover:text-white font-medium"
-              >
-                {agent.displayName}
-              </Link>
+              <div className="flex items-center gap-1.5">
+                <Link
+                  href={`/agents/${agent.id}`}
+                  className="text-zinc-100 hover:text-white font-medium"
+                >
+                  {agent.displayName}
+                </Link>
+                {agent.actorKind === "human" && <ActorKindBadge kind="human" />}
+              </div>
             </TableCell>
             <TableCell>
               <Badge

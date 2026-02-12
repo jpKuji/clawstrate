@@ -8,6 +8,9 @@ export interface SourceDisplayConfig {
   dotColor: string;
   postLabel: string;
   commentLabel: string;
+  sourceType: "forum" | "marketplace";
+  actorKinds: ("ai" | "human")[];
+  description: string;
 }
 
 const SOURCE_COLORS = [
@@ -35,6 +38,19 @@ const ACTION_LABEL_OVERRIDES: Record<
   rentahuman: { postLabel: "Bounties", commentLabel: "Assigned" },
 };
 
+const SOURCE_TYPE_OVERRIDES: Record<string, { sourceType: "forum" | "marketplace"; actorKinds: ("ai" | "human")[]; description: string }> = {
+  moltbook: {
+    sourceType: "forum",
+    actorKinds: ["ai"],
+    description: "AI-native forum — posts and comments from autonomous agents",
+  },
+  rentahuman: {
+    sourceType: "marketplace",
+    actorKinds: ["ai", "human"],
+    description: "AI-to-human marketplace — bounties posted by AI, assigned to humans",
+  },
+};
+
 function defaultShortLabel(displayName: string): string {
   const upper = displayName.replace(/[^A-Z]/g, "");
   if (upper.length >= 2) return upper.slice(0, 3);
@@ -52,6 +68,12 @@ export function getSourceDisplayMap(): Map<string, SourceDisplayConfig> {
       commentLabel: "Comments",
     };
 
+    const sourceTypeConfig = SOURCE_TYPE_OVERRIDES[adapter.id] ?? {
+      sourceType: "forum" as const,
+      actorKinds: ["ai" as const],
+      description: "Source platform",
+    };
+
     map.set(adapter.id, {
       id: adapter.id,
       displayName: adapter.displayName,
@@ -61,6 +83,7 @@ export function getSourceDisplayMap(): Map<string, SourceDisplayConfig> {
       color: palette.color,
       dotColor: palette.dotColor,
       ...actionLabels,
+      ...sourceTypeConfig,
     });
   });
 

@@ -83,10 +83,26 @@ export function TopicsExplorer({
             Loading...
           </span>
         )}
+        {source !== "all" && (
+          <p className="text-[11px] text-zinc-500 mt-1">
+            {sourceDisplayList.find((s) => s.id === source)?.description}
+          </p>
+        )}
       </div>
-      <div className="border border-zinc-800 bg-[var(--panel-bg)] overflow-hidden">
-        <TopicTable topics={topics} />
-      </div>
+      {topics.length === 0 ? (
+        <div className="border border-zinc-800 bg-[var(--panel-bg)] px-6 py-12 text-center">
+          <p className="text-zinc-500 text-sm">No topics found</p>
+          {source !== "all" && (
+            <p className="text-zinc-600 text-xs mt-1">
+              Data from {sourceDisplayList.find((s) => s.id === source)?.displayName ?? source} may not have been ingested yet
+            </p>
+          )}
+        </div>
+      ) : (
+        <div className="border border-zinc-800 bg-[var(--panel-bg)] overflow-hidden">
+          <TopicTable topics={topics} />
+        </div>
+      )}
     </div>
   );
 }

@@ -51,21 +51,29 @@ export async function GET(req: NextRequest) {
             .select({
               agentId: agentIdentities.agentId,
               platformId: agentIdentities.platformId,
+              rawProfile: agentIdentities.rawProfile,
             })
             .from(agentIdentities)
             .where(inArray(agentIdentities.agentId, agentIds))
         : [];
 
     const platformMap = new Map<string, string[]>();
+    const actorKindMap = new Map<string, string>();
     for (const row of identities) {
       const list = platformMap.get(row.agentId) || [];
       list.push(row.platformId);
       platformMap.set(row.agentId, list);
+
+      const kind = (row.rawProfile as Record<string, unknown>)?.actorKind;
+      if (kind && !actorKindMap.has(row.agentId)) {
+        actorKindMap.set(row.agentId, kind as string);
+      }
     }
 
     const enrichedResults = results.map((a) => ({
       ...a,
       platformIds: platformMap.get(a.id) || [],
+      actorKind: actorKindMap.get(a.id) || "ai",
     }));
 
     // Cache for 60 seconds

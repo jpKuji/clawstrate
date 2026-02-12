@@ -26,6 +26,8 @@ export interface NormalizedAction {
   parentPlatformActionId: string | null;
   // Raw data
   rawData: Record<string, unknown>;
+  // Actor kind — "ai" (default) or "human"
+  actorKind?: "ai" | "human";
 }
 
 export interface SourceIngestionResult {

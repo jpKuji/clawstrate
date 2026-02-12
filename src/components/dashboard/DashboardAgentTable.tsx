@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { SourceDot } from "@/components/shared/SourceBadge";
+import { ActorKindBadge } from "@/components/shared/ActorKindBadge";
 import type { SourceDisplayConfig } from "@/lib/sources/display";
 
 interface Agent {
@@ -9,6 +10,7 @@ interface Agent {
   autonomyScore: number | null;
   agentType: string | null;
   platformIds?: string[];
+  actorKind?: string;
 }
 
 const typeColors: Record<string, string> = {
@@ -66,6 +68,7 @@ export function DashboardAgentTable({
               >
                 {agent.displayName}
               </Link>
+              {agent.actorKind === "human" && <ActorKindBadge kind="human" />}
               <div className="flex items-center gap-0.5 shrink-0">
                 {(agent.platformIds ?? []).map((pid) => (
                   <SourceDot key={pid} sourceId={pid} />
