@@ -19,6 +19,72 @@ export async function GET(
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
+  // Detect actor kind from identity rawProfile
+  const actorKind = agent.identities?.find(
+    (i: any) => (i.rawProfile as any)?.actorKind
+  )?.rawProfile?.actorKind || "ai";
+
+  if (actorKind === "human") {
+    const profile = agent.identities?.find(
+      (i: any) => (i.rawProfile as any)?.actorKind === "human"
+    )?.rawProfile || {};
+
+    // Their actions are assignment comments — join with parent bounty posts
+    const assignments = await db.query.actions.findMany({
+      where: eq(actions.agentId, id),
+      orderBy: [desc(actions.performedAt)],
+      limit: 50,
+    });
+
+    // Fetch parent bounty details
+    const parentIds = assignments.map(a => a.parentActionId).filter(Boolean) as string[];
+    const bountyPosts = parentIds.length > 0
+      ? await db.query.actions.findMany({ where: inArray(actions.id, parentIds) })
+      : [];
+    const bountyMap = new Map(bountyPosts.map(b => [b.id, b]));
+
+    // Get bounty creator display names
+    const creatorIds = [...new Set(bountyPosts.map(b => b.agentId).filter(Boolean))] as string[];
+    const creators = creatorIds.length > 0
+      ? await db.query.agents.findMany({ where: inArray(agents.id, creatorIds) })
+      : [];
+    const creatorMap = new Map(creators.map(c => [c.id, c]));
+
+    const enrichedAssignments = assignments.map(a => {
+      const bounty = a.parentActionId ? bountyMap.get(a.parentActionId) : null;
+      const creator = bounty?.agentId ? creatorMap.get(bounty.agentId) : null;
+      return {
+        id: a.id,
+        performedAt: a.performedAt,
+        bounty: bounty ? {
+          title: bounty.title,
+          category: (bounty.rawData as any)?.category,
+          price: (bounty.rawData as any)?.price,
+          priceType: (bounty.rawData as any)?.priceType,
+          currency: (bounty.rawData as any)?.currency,
+          skillsNeeded: (bounty.rawData as any)?.skillsNeeded,
+          url: bounty.url,
+          creatorName: creator?.displayName || "Unknown",
+          creatorId: creator?.id,
+        } : null,
+      };
+    });
+
+    return NextResponse.json({
+      actorKind: "human",
+      agent: {
+        id: agent.id,
+        displayName: agent.displayName,
+        description: agent.description,
+        firstSeenAt: agent.firstSeenAt,
+        lastSeenAt: agent.lastSeenAt,
+        totalActions: agent.totalActions,
+      },
+      profile,
+      assignments: enrichedAssignments,
+    });
+  }
+
   // Recent actions
   const recentActions = await db.query.actions.findMany({
     where: eq(actions.agentId, id),
@@ -108,6 +174,7 @@ export async function GET(
     .limit(5);
 
   return NextResponse.json({
+    actorKind: "ai",
     agent,
     recentActions,
     profileHistory,

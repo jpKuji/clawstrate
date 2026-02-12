@@ -151,6 +151,11 @@ export async function GET(req?: NextRequest) {
         })(),
     source === "all"
       ? db.query.agents.findMany({
+          where: sql`NOT EXISTS (
+            SELECT 1 FROM agent_identities ai
+            WHERE ai.agent_id = ${agents.id}
+              AND (ai.raw_profile->>'actorKind') = 'human'
+          )`,
           orderBy: (a, { desc }) => [desc(a.influenceScore)],
           limit: 10,
         })
@@ -159,6 +164,10 @@ export async function GET(req?: NextRequest) {
             SELECT 1 FROM actions a
             WHERE a.agent_id = ${agents.id}
               AND a.platform_id = ${source}
+          ) AND NOT EXISTS (
+            SELECT 1 FROM agent_identities ai
+            WHERE ai.agent_id = ${agents.id}
+              AND (ai.raw_profile->>'actorKind') = 'human'
           )`,
           orderBy: (a, { desc }) => [desc(a.influenceScore)],
           limit: 10,

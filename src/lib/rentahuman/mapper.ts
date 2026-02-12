@@ -88,5 +88,23 @@ export function mapAssignmentToComment(
       bookingIds: bounty.bookingIds ?? [],
     },
     actorKind: "human",
+    authorRawProfile: {
+      actorKind: "human",
+      name: human.name,
+      headline: human.headline,
+      bio: human.bio,
+      skills: human.skills,
+      expertise: human.expertise,
+      languages: human.languages,
+      location: human.location,
+      hourlyRate: human.hourlyRate,
+      currency: human.currency,
+      rating: human.rating,
+      reviewCount: human.reviewCount,
+      totalBookings: human.totalBookings,
+      isVerified: human.isVerified,
+      isAvailable: human.isAvailable,
+      avatarUrl: human.avatarUrl,
+    },
   };
 }

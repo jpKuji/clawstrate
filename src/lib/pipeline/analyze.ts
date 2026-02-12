@@ -1,6 +1,7 @@
 import { db } from "../db";
 import {
   agents,
+  agentIdentities,
   actions,
   enrichments,
   interactions,
@@ -9,7 +10,7 @@ import {
   actionTopics,
   dailyAgentStats,
 } from "../db/schema";
-import { eq, desc, gte, lte, sql, count, avg, and } from "drizzle-orm";
+import { eq, desc, gte, lte, sql, count, avg, and, inArray } from "drizzle-orm";
 import { subHours, subDays } from "date-fns";
 
 /**
@@ -133,9 +134,24 @@ export async function runAnalysis(): Promise<{
     normalizedScores.set(id, score / maxPageRank);
   }
 
+  // Skip human service providers — scores are meaningless for non-autonomous actors
+  const humanAgentIds = new Set<string>();
+  if (analyzableAgentIds.size > 0) {
+    const identitiesWithKind = await db
+      .select({ agentId: agentIdentities.agentId, rawProfile: agentIdentities.rawProfile })
+      .from(agentIdentities)
+      .where(inArray(agentIdentities.agentId, [...analyzableAgentIds]));
+    for (const row of identitiesWithKind) {
+      if ((row.rawProfile as Record<string, unknown>)?.actorKind === "human") {
+        humanAgentIds.add(row.agentId);
+      }
+    }
+  }
+
   let agentsUpdated = 0;
 
   for (const agentId of analyzableAgentIds) {
+    if (humanAgentIds.has(agentId)) continue;
     const influenceScore = normalizedScores.get(agentId) || 0;
 
     // Get average autonomy score for this agent's actions

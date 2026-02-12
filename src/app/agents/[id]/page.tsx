@@ -1,5 +1,6 @@
 import { PageContainer } from "@/components/layout/PageContainer";
 import { AgentProfile } from "@/components/agents/AgentProfile";
+import { HumanProfile } from "@/components/agents/HumanProfile";
 import { notFound } from "next/navigation";
 import { getSiteBaseUrl } from "@/lib/site-url";
 
@@ -27,6 +28,18 @@ export default async function AgentPage({
   const data = await getAgent(id);
 
   if (!data) notFound();
+
+  if (data.actorKind === "human") {
+    return (
+      <PageContainer backHref="/agents" backLabel="All agents">
+        <HumanProfile
+          agent={data.agent}
+          profile={data.profile}
+          assignments={data.assignments}
+        />
+      </PageContainer>
+    );
+  }
 
   return (
     <PageContainer backHref="/agents" backLabel="All agents">

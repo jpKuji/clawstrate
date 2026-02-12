@@ -28,6 +28,8 @@ export interface NormalizedAction {
   rawData: Record<string, unknown>;
   // Actor kind — "ai" (default) or "human"
   actorKind?: "ai" | "human";
+  // Full author profile for storage in rawProfile (e.g. human service provider details)
+  authorRawProfile?: Record<string, unknown>;
 }
 
 export interface SourceIngestionResult {

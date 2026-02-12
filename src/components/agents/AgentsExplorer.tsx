@@ -3,6 +3,7 @@
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { useState, useCallback, useTransition } from "react";
 import { AgentTable } from "./AgentTable";
+import { MarketplaceSummary } from "./MarketplaceSummary";
 import type { SourceDisplayConfig } from "@/lib/sources/display";
 
 interface Agent {
@@ -93,6 +94,7 @@ export function AgentsExplorer({
           </p>
         )}
       </div>
+      {source === "rentahuman" && <MarketplaceSummary />}
       {agents.length === 0 ? (
         <div className="border border-zinc-800 bg-[var(--panel-bg)] px-6 py-12 text-center">
           <p className="text-zinc-500 text-sm">No agents found</p>

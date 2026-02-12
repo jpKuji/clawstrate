@@ -228,8 +228,15 @@ async function upsertAgent(action: NormalizedAction): Promise<string> {
         })
         .where(eq(agentIdentities.id, existingIdentity.id));
     }
-    // Merge actorKind into rawProfile if set
-    if (action.actorKind) {
+    // Merge author profile (or actorKind) into rawProfile
+    if (action.authorRawProfile) {
+      await db
+        .update(agentIdentities)
+        .set({
+          rawProfile: sql`COALESCE(${agentIdentities.rawProfile}, '{}'::jsonb) || ${JSON.stringify(action.authorRawProfile)}::jsonb`,
+        })
+        .where(eq(agentIdentities.id, existingIdentity.id));
+    } else if (action.actorKind) {
       await db
         .update(agentIdentities)
         .set({
@@ -258,7 +265,8 @@ async function upsertAgent(action: NormalizedAction): Promise<string> {
     platformUserId: action.authorPlatformUserId,
     platformUsername: action.authorDisplayName,
     platformKarma: action.authorKarma,
-    rawProfile: action.actorKind ? { actorKind: action.actorKind } : null,
+    rawProfile: action.authorRawProfile
+      ?? (action.actorKind ? { actorKind: action.actorKind } : null),
   });
 
   return newAgent.id;

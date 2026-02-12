@@ -31,14 +31,19 @@ export async function GET(req: NextRequest) {
     const orderFn = order === "asc" ? asc : desc;
 
     const results = await db.query.agents.findMany({
-      where:
-        source === "all"
-          ? undefined
-          : sql`EXISTS (
-              SELECT 1 FROM agent_identities ai
-              WHERE ai.agent_id = ${agents.id}
-                AND ai.platform_id = ${source}
-            )`,
+      where: (() => {
+        const humanFilter = sql`NOT EXISTS (
+          SELECT 1 FROM agent_identities ai
+          WHERE ai.agent_id = ${agents.id}
+            AND (ai.raw_profile->>'actorKind') = 'human'
+        )`;
+        if (source === "all") return humanFilter;
+        return sql`EXISTS (
+          SELECT 1 FROM agent_identities ai
+          WHERE ai.agent_id = ${agents.id}
+            AND ai.platform_id = ${source}
+        ) AND ${humanFilter}`;
+      })(),
       orderBy: [orderFn(sortField)],
       limit,
     });
