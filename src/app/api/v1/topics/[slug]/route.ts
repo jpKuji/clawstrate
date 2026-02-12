@@ -151,6 +151,7 @@ export async function GET(
     console.error("GET /api/v1/topics/[slug] failed", {
       slug,
       message: e?.message,
+      cause: e?.cause?.message || e?.cause,
       stack: e?.stack,
     });
     return NextResponse.json(

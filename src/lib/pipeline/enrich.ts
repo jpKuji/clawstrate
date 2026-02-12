@@ -232,32 +232,46 @@ export async function runEnrichment(): Promise<{
                 where: eq(topics.slug, slugCandidate),
               });
 
-              if (collision && collision.nameKey !== nameKey) {
-                slugCandidate = `${baseSlug}-${hash6(nameKey)}`;
+              if (collision) {
+                // Transitional rollout: older rows may have NULL name_key. If the slug matches
+                // and the name_key is unset (or already matches), adopt this topic and backfill.
+                if (collision.nameKey == null || collision.nameKey === nameKey) {
+                  topic = collision;
+                  if (collision.nameKey == null) {
+                    await db
+                      .update(topics)
+                      .set({ nameKey })
+                      .where(eq(topics.id, collision.id));
+                  }
+                } else {
+                  slugCandidate = `${baseSlug}-${hash6(nameKey)}`;
+                }
               }
 
-              const inserted = await db
-                .insert(topics)
-                .values({
-                  slug: slugCandidate,
-                  name: t.name,
-                  nameKey,
-                  firstSeenAt: action.performedAt,
-                  lastSeenAt: action.performedAt,
-                })
-                .onConflictDoNothing()
-                .returning();
+              if (!topic) {
+                const inserted = await db
+                  .insert(topics)
+                  .values({
+                    slug: slugCandidate,
+                    name: t.name,
+                    nameKey,
+                    firstSeenAt: action.performedAt,
+                    lastSeenAt: action.performedAt,
+                  })
+                  .onConflictDoNothing()
+                  .returning();
 
-              if (inserted.length > 0) {
-                topic = inserted[0];
-              } else {
-                topic =
-                  (await db.query.topics.findFirst({
-                    where: eq(topics.nameKey, nameKey),
-                  })) ||
-                  (await db.query.topics.findFirst({
-                    where: eq(topics.slug, slugCandidate),
-                  }));
+                if (inserted.length > 0) {
+                  topic = inserted[0];
+                } else {
+                  topic =
+                    (await db.query.topics.findFirst({
+                      where: eq(topics.nameKey, nameKey),
+                    })) ||
+                    (await db.query.topics.findFirst({
+                      where: eq(topics.slug, slugCandidate),
+                    }));
+                }
               }
             } else {
               await db

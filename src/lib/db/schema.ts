@@ -298,7 +298,8 @@ export const topics = pgTable(
     name: text("name").notNull(), // Display name
     // Stable dedupe key: normalized name (case-fold + whitespace collapse).
     // Used to aggregate topics that share the same display name but different slugs.
-    nameKey: text("name_key").notNull(),
+    // Nullable until migration 0004 enforces NOT NULL after backfill + merge.
+    nameKey: text("name_key"),
     description: text("description"),
     // Aggregated stats (recomputed periodically)
     actionCount: integer("action_count").default(0),
@@ -312,7 +313,7 @@ export const topics = pgTable(
   (t) => [
     index("idx_topic_velocity").on(t.velocity),
     index("idx_topic_action_count").on(t.actionCount),
-    uniqueIndex("idx_topics_name_key_unique").on(t.nameKey),
+    index("idx_topics_name_key").on(t.nameKey),
   ]
 );
 
