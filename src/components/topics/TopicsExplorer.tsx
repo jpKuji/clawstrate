@@ -1,7 +1,7 @@
 "use client";
 
-import { useRouter, useSearchParams, usePathname } from "next/navigation";
-import { useState, useCallback, useTransition } from "react";
+import { useSearchParams, usePathname } from "next/navigation";
+import { useState, useCallback } from "react";
 import { TopicTable } from "./TopicTable";
 import type { SourceDisplayConfig } from "@/lib/sources/display";
 
@@ -22,13 +22,11 @@ export function TopicsExplorer({
   initialTopics: Topic[];
   sourceDisplayList: SourceDisplayConfig[];
 }) {
-  const router = useRouter();
   const searchParams = useSearchParams();
   const pathname = usePathname();
   const source = searchParams.get("source") || "all";
   const [topics, setTopics] = useState(initialTopics);
   const [loading, setLoading] = useState(false);
-  const [isPending, startTransition] = useTransition();
 
   const handleSourceChange = useCallback(
     (value: string) => {
@@ -51,16 +49,15 @@ export function TopicsExplorer({
             urlParams.set("source", value);
           }
           const qs = urlParams.toString();
-          startTransition(() => {
-            router.replace(qs ? `${pathname}?${qs}` : pathname, {
-              scroll: false,
-            });
-          });
+          window.history.replaceState(null, "", qs ? `${pathname}?${qs}` : pathname);
         })
-        .catch((e) => console.error(e))
+        .catch((e) => {
+          console.error("Failed to fetch topics:", e);
+          setTopics([]);
+        })
         .finally(() => setLoading(false));
     },
-    [router, pathname, searchParams, startTransition]
+    [pathname, searchParams]
   );
 
   return (
@@ -78,7 +75,7 @@ export function TopicsExplorer({
             </option>
           ))}
         </select>
-        {(loading || isPending) && (
+        {loading && (
           <span className="text-[10px] text-zinc-500 uppercase tracking-wider">
             Loading...
           </span>

@@ -17,6 +17,7 @@ interface TopicAction {
     id: string;
     title: string | null;
     content: string | null;
+    url: string | null;
     actionType: string;
     performedAt: string;
     upvotes: number | null;
@@ -50,6 +51,10 @@ interface TopContributor {
   agentId: string | null;
   agentName: string | null;
   actionCount: number;
+}
+
+function cleanContent(raw: string): string {
+  return raw.replace(/\{[^{}]*\}/g, "").replace(/\s{2,}/g, " ").trim();
 }
 
 export function TopicDetail({
@@ -148,7 +153,12 @@ export function TopicDetail({
                   }}
                   labelStyle={{ color: "#a1a1aa" }}
                 />
-                <Bar dataKey="count" fill="#00e5cc" radius={[2, 2, 0, 0]} />
+                <Bar
+                  dataKey="count"
+                  fill="#00e5cc"
+                  radius={[2, 2, 0, 0]}
+                  activeBar={{ fillOpacity: 0.5 }}
+                />
               </BarChart>
             </ResponsiveContainer>
           </CardContent>
@@ -190,7 +200,7 @@ export function TopicDetail({
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Top Contributors */}
         {topContributors && topContributors.length > 0 && (
-          <Card className="bg-zinc-900 border-zinc-800">
+          <Card className={`bg-zinc-900 border-zinc-800${!cooccurringTopics?.length ? " lg:col-span-2" : ""}`}>
             <CardHeader>
               <CardTitle className="text-[11px] uppercase tracking-widest text-accent">
                 Top Contributors
@@ -221,7 +231,7 @@ export function TopicDetail({
 
         {/* Co-occurring Topics */}
         {cooccurringTopics && cooccurringTopics.length > 0 && (
-          <Card className="bg-zinc-900 border-zinc-800">
+          <Card className={`bg-zinc-900 border-zinc-800${!topContributors?.length ? " lg:col-span-2" : ""}`}>
             <CardHeader>
               <CardTitle className="text-[11px] uppercase tracking-widest text-accent">
                 Related Topics
@@ -297,11 +307,24 @@ export function TopicDetail({
                   </span>
                 </div>
                 {item.action.title && (
-                  <p className="text-sm font-medium text-zinc-200">{item.action.title}</p>
+                  <p className="text-sm font-medium text-zinc-200">
+                    {item.action.url ? (
+                      <a
+                        href={item.action.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="hover:text-accent transition-colors"
+                      >
+                        {item.action.title}
+                      </a>
+                    ) : (
+                      item.action.title
+                    )}
+                  </p>
                 )}
-                {item.action.content && (
+                {item.action.content && cleanContent(item.action.content) && (
                   <p className="text-xs text-zinc-400 line-clamp-2 mt-1">
-                    {item.action.content.slice(0, 200)}
+                    {cleanContent(item.action.content).slice(0, 200)}
                   </p>
                 )}
               </div>
