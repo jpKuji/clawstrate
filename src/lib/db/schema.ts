@@ -329,6 +329,45 @@ export const topicAliases = pgTable(
   (t) => [index("idx_topic_aliases_topic_id").on(t.topicId)]
 );
 
+// Map alternate normalized names (alias name_key values) to a canonical topic.
+// This prevents merged-away topic names from being recreated by future enrichments.
+export const topicNameAliases = pgTable(
+  "topic_name_aliases",
+  {
+    aliasNameKey: text("alias_name_key").primaryKey(),
+    topicId: uuid("topic_id")
+      .references(() => topics.id)
+      .notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (t) => [index("idx_topic_name_aliases_topic_id").on(t.topicId)]
+);
+
+export const topicMergeProposals = pgTable(
+  "topic_merge_proposals",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    proposalKey: text("proposal_key").notNull(),
+    status: text("status").notNull().default("proposed"), // proposed | approved | applied | rejected
+    model: text("model").notNull(),
+    promptVersion: text("prompt_version").notNull().default("v1"),
+    signature: text("signature"),
+    candidateTopicIds: jsonb("candidate_topic_ids").$type<string[]>().notNull(),
+    canonicalTopicId: uuid("canonical_topic_id").references(() => topics.id),
+    mergeTopicIds: jsonb("merge_topic_ids").$type<string[]>(),
+    confidence: real("confidence"),
+    rationale: text("rationale"),
+    llmOutput: jsonb("llm_output").$type<Record<string, unknown>>(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    appliedAt: timestamp("applied_at"),
+    rejectedAt: timestamp("rejected_at"),
+  },
+  (t) => [
+    uniqueIndex("idx_topic_merge_proposals_key_unique").on(t.proposalKey),
+    index("idx_topic_merge_proposals_status_created").on(t.status, t.createdAt),
+  ]
+);
+
 export const actionTopics = pgTable(
   "action_topics",
   {

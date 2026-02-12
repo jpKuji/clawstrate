@@ -40,6 +40,8 @@ vi.mock("@/lib/db", () => ({
     query: {
       actions: { findMany: mockFindMany, findFirst: mockFindFirst },
       topics: { findFirst: vi.fn().mockResolvedValue(null) },
+      topicAliases: { findFirst: vi.fn().mockResolvedValue(null) },
+      topicNameAliases: { findFirst: vi.fn().mockResolvedValue(null) },
     },
   },
 }));

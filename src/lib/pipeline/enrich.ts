@@ -1,7 +1,14 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { createHash } from "node:crypto";
 import { db } from "../db";
-import { actions, enrichments, topics, topicAliases, actionTopics } from "../db/schema";
+import {
+  actions,
+  enrichments,
+  topics,
+  topicAliases,
+  topicNameAliases,
+  actionTopics,
+} from "../db/schema";
 import { eq, sql } from "drizzle-orm";
 import { normalizeTopicNameKey, slugifyTopicName } from "../topics/normalize";
 
@@ -220,9 +227,23 @@ export async function runEnrichment(): Promise<{
           const canonicalTopicSlugs: string[] = [];
 
           for (const [nameKey, t] of topicByKey.entries()) {
-            let topic = await db.query.topics.findFirst({
-              where: eq(topics.nameKey, nameKey),
+            let topic = null as any;
+
+            // First, resolve known merged-away name keys.
+            const nameAlias = await db.query.topicNameAliases.findFirst({
+              where: eq(topicNameAliases.aliasNameKey, nameKey),
             });
+            if (nameAlias) {
+              topic = await db.query.topics.findFirst({
+                where: eq(topics.id, nameAlias.topicId),
+              });
+            }
+
+            if (!topic) {
+              topic = await db.query.topics.findFirst({
+                where: eq(topics.nameKey, nameKey),
+              });
+            }
 
             if (!topic) {
               const baseSlug = slugifyTopicName(t.name);
