@@ -5,6 +5,7 @@ import { actions, actionTopics, topicMergeProposals, topics } from "@/lib/db/sch
 import { desc, eq, sql, inArray } from "drizzle-orm";
 import { repairJson } from "@/lib/briefing-parser";
 import { normalizeTopicNameKey } from "./normalize";
+import { mergeTopicIntoCanonical } from "./apply-merge";
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const MODEL = "claude-haiku-4-5-20251001";
@@ -280,4 +281,250 @@ export async function proposeSemanticTopicMerges(opts?: {
 
 export function computeNameKeyForName(name: string): string {
   return normalizeTopicNameKey(name);
+}
+
+async function tryAcquirePgLock(name: string): Promise<boolean> {
+  const res = await db.execute(
+    sql.raw(
+      `select pg_try_advisory_lock(hashtext($$${name}$$), hashtext($$global$$)) as ok`
+    )
+  );
+  return Boolean((res.rows as any[])?.[0]?.ok);
+}
+
+async function releasePgLock(name: string): Promise<void> {
+  await db.execute(
+    sql.raw(
+      `select pg_advisory_unlock(hashtext($$${name}$$), hashtext($$global$$))`
+    )
+  );
+}
+
+export async function autoMergeSemanticTopicsForTopicIds(opts: {
+  topicIds: string[];
+  minConfidence?: number;
+  maxSignatures?: number;
+  maxTopicsPerSignature?: number;
+  minActionCount?: number;
+  maxMergedTopics?: number;
+}): Promise<{
+  signaturesConsidered: number;
+  proposalsInserted: number;
+  mergesApplied: number;
+  mergedTopics: number;
+}> {
+  const minConfidence = opts.minConfidence ?? 0.8;
+  const maxSignatures = opts.maxSignatures ?? 8;
+  const maxTopicsPerSignature = opts.maxTopicsPerSignature ?? 8;
+  const minActionCount = opts.minActionCount ?? 1;
+  const maxMergedTopics = opts.maxMergedTopics ?? 25;
+
+  // Default behavior: on in production, off elsewhere unless explicitly enabled.
+  const enabled =
+    process.env.AUTO_TOPIC_MERGE === "1" ||
+    (process.env.NODE_ENV === "production" && process.env.AUTO_TOPIC_MERGE !== "0");
+  if (!enabled) {
+    return {
+      signaturesConsidered: 0,
+      proposalsInserted: 0,
+      mergesApplied: 0,
+      mergedTopics: 0,
+    };
+  }
+
+  const lockName = "topic-semantic-merges-auto";
+  const locked = await tryAcquirePgLock(lockName);
+  if (!locked) {
+    return {
+      signaturesConsidered: 0,
+      proposalsInserted: 0,
+      mergesApplied: 0,
+      mergedTopics: 0,
+    };
+  }
+
+  try {
+    const topicIdSet = new Set(opts.topicIds.map(String));
+    if (topicIdSet.size === 0) {
+      return {
+        signaturesConsidered: 0,
+        proposalsInserted: 0,
+        mergesApplied: 0,
+        mergedTopics: 0,
+      };
+    }
+
+    const all = await db.query.topics.findMany({
+      columns: {
+        id: true,
+        slug: true,
+        name: true,
+        nameKey: true,
+        actionCount: true,
+      },
+    });
+
+    const rows: TopicRow[] = all.map((t) => ({
+      id: t.id,
+      slug: t.slug,
+      name: t.name,
+      nameKey: t.nameKey ?? null,
+      actionCount: Number(t.actionCount ?? 0),
+    }));
+
+    const signatureById = new Map<string, string>();
+    for (const r of rows) {
+      if (r.actionCount < minActionCount) continue;
+      const sig = signatureForTopic(r.name);
+      if (!sig) continue;
+      signatureById.set(r.id, sig);
+    }
+
+    const touchedSignatures = new Set<string>();
+    for (const id of topicIdSet) {
+      const sig = signatureById.get(id);
+      if (sig) touchedSignatures.add(sig);
+    }
+
+    if (touchedSignatures.size === 0) {
+      return {
+        signaturesConsidered: 0,
+        proposalsInserted: 0,
+        mergesApplied: 0,
+        mergedTopics: 0,
+      };
+    }
+
+    // Build candidate groups for the touched signatures.
+    const groups = new Map<string, TopicRow[]>();
+    for (const r of rows) {
+      if (r.actionCount < minActionCount) continue;
+      const sig = signatureForTopic(r.name);
+      if (!sig) continue;
+      if (!touchedSignatures.has(sig)) continue;
+      const list = groups.get(sig);
+      if (list) list.push(r);
+      else groups.set(sig, [r]);
+    }
+
+    const candidates = Array.from(groups.entries())
+      .filter(([, list]) => list.length >= 2)
+      .map(([sig, list]) => ({
+        sig,
+        list: list.slice().sort((a, b) => b.actionCount - a.actionCount).slice(0, maxTopicsPerSignature),
+        score: list.reduce((s, t) => s + t.actionCount, 0),
+      }))
+      .sort((a, b) => b.score - a.score)
+      .slice(0, maxSignatures);
+
+    let proposalsInserted = 0;
+    let mergesApplied = 0;
+    let mergedTopics = 0;
+
+    for (const cand of candidates) {
+      const withSamples = [];
+      for (const t of cand.list) {
+        const samples = await getTopicSamples(t.id);
+        withSamples.push({ ...t, samples });
+      }
+
+      const prompt = buildPrompt(cand.sig, withSamples);
+      const resp = await anthropic.messages.create({
+        model: MODEL,
+        max_tokens: 1500,
+        messages: [{ role: "user", content: prompt }],
+      });
+
+      const text = resp.content
+        .map((c: any) => (c.type === "text" ? c.text : ""))
+        .join("\n");
+
+      const parsed = parseJson(text);
+      const mergeGroups = Array.isArray(parsed?.mergeGroups) ? parsed.mergeGroups : [];
+
+      for (const g of mergeGroups) {
+        if (mergedTopics >= maxMergedTopics) break;
+
+        const canonicalTopicId = String(g?.canonicalTopicId || "");
+        const mergeTopicIds = Array.isArray(g?.mergeTopicIds)
+          ? g.mergeTopicIds.map((x: any) => String(x)).filter(Boolean)
+          : [];
+        const confidence = typeof g?.confidence === "number" ? g.confidence : null;
+        const rationale = typeof g?.rationale === "string" ? g.rationale : null;
+
+        if (confidence == null || confidence < minConfidence) continue;
+
+        const allowed = new Set(cand.list.map((t) => t.id));
+        if (!allowed.has(canonicalTopicId)) continue;
+        const filteredMergeIds = mergeTopicIds.filter(
+          (id) => allowed.has(id) && id !== canonicalTopicId
+        );
+        if (filteredMergeIds.length === 0) continue;
+
+        const proposalKey = stableKey(
+          `auto:${PROMPT_VERSION}:${MODEL}:${canonicalTopicId}:${filteredMergeIds.slice().sort().join(",")}`
+        );
+
+        // Persist proposal for auditability (even though we auto-apply).
+        const inserted = await db
+          .insert(topicMergeProposals)
+          .values({
+            proposalKey,
+            status: "proposed",
+            model: MODEL,
+            promptVersion: PROMPT_VERSION,
+            signature: cand.sig,
+            candidateTopicIds: cand.list.map((t) => t.id),
+            canonicalTopicId,
+            mergeTopicIds: filteredMergeIds,
+            confidence: confidence ?? undefined,
+            rationale: rationale ?? undefined,
+            llmOutput: parsed ?? { raw: text },
+          })
+          .onConflictDoNothing()
+          .returning({ id: topicMergeProposals.id });
+
+        if (inserted.length > 0) proposalsInserted++;
+
+        // Apply merge immediately.
+        for (const id of filteredMergeIds) {
+          if (mergedTopics >= maxMergedTopics) break;
+          await mergeTopicIntoCanonical({ canonicalTopicId, mergeTopicId: id });
+          mergedTopics++;
+        }
+
+        // Recompute action_count for canonical to avoid drift.
+        await db.execute(sql`
+          UPDATE topics
+          SET action_count = sub.cnt
+          FROM (
+            SELECT topic_id, COUNT(*)::int AS cnt
+            FROM action_topics
+            WHERE topic_id = ${canonicalTopicId}
+            GROUP BY topic_id
+          ) sub
+          WHERE topics.id = sub.topic_id
+        `);
+
+        // Mark the proposal applied if we inserted it.
+        if (inserted.length > 0) {
+          await db
+            .update(topicMergeProposals)
+            .set({ status: "applied", appliedAt: new Date() })
+            .where(eq(topicMergeProposals.id, inserted[0].id));
+        }
+
+        mergesApplied++;
+      }
+    }
+
+    return {
+      signaturesConsidered: candidates.length,
+      proposalsInserted,
+      mergesApplied,
+      mergedTopics,
+    };
+  } finally {
+    await releasePgLock(lockName);
+  }
 }

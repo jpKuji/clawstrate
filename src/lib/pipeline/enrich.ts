@@ -11,6 +11,7 @@ import {
 } from "../db/schema";
 import { eq, sql } from "drizzle-orm";
 import { normalizeTopicNameKey, slugifyTopicName } from "../topics/normalize";
+import { autoMergeSemanticTopicsForTopicIds } from "../topics/semantic-merge";
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const BATCH_SIZE = 10;
@@ -92,6 +93,8 @@ export async function runEnrichment(): Promise<{
 }> {
   const errors: string[] = [];
   let enrichedCount = 0;
+  const touchedTopicIds = new Set<string>();
+  const enrichedPlatforms = new Set<string>();
 
   // Get un-enriched actions
   const unenriched = await db.query.actions.findMany({
@@ -307,6 +310,7 @@ export async function runEnrichment(): Promise<{
             if (!topic) continue;
 
             canonicalTopicSlugs.push(topic.slug);
+            touchedTopicIds.add(topic.id);
 
             // Preserve LLM-provided slugs as aliases so old links/bookmarks still resolve.
             for (const aliasSlug of t.llmSlugs) {
@@ -369,12 +373,34 @@ export async function runEnrichment(): Promise<{
             .where(eq(actions.id, action.id));
 
           enrichedCount++;
+          enrichedPlatforms.add(action.platformId);
         } catch (e: any) {
           errors.push(`save enrichment ${action.platformActionId}: ${e.message}`);
         }
       }
     } catch (e: any) {
       errors.push(`batch ${i} API call: ${e.message}`);
+    }
+  }
+
+  // Fully-automated semantic topic merging:
+  // If Moltbook actions were enriched this run, run a small semantic merge pass focused on the topics we touched.
+  // This keeps taxonomy clean without manual approval. Failures here should not fail the enrich stage.
+  if (enrichedCount > 0 && enrichedPlatforms.has("moltbook") && touchedTopicIds.size > 0) {
+    try {
+      const res = await autoMergeSemanticTopicsForTopicIds({
+        topicIds: Array.from(touchedTopicIds),
+        minConfidence: 0.8,
+        maxSignatures: 8,
+        maxTopicsPerSignature: 8,
+        minActionCount: 1,
+        maxMergedTopics: 25,
+      });
+      if (res.mergedTopics > 0) {
+        console.log("[enrich] auto-merged semantic topics", res);
+      }
+    } catch (e: any) {
+      console.error("[enrich] auto semantic merge failed", { message: e?.message });
     }
   }
 
