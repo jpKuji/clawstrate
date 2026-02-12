@@ -31,6 +31,11 @@ const schedules = [
     cron: "0 9 * * 1",
     name: "clawstrate-briefing-weekly",
   },
+  {
+    destination: `${BASE_URL}/api/cron/topic-merges`,
+    cron: "0 */6 * * *",
+    name: "clawstrate-topic-merges",
+  },
 ];
 
 async function main() {

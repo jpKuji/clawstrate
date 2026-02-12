@@ -248,7 +248,7 @@ export async function proposeSemanticTopicMerges(opts?: {
       // Basic validation: canonical must be in candidate set, merges must be subset.
       const allowed = new Set(cand.list.map((t) => t.id));
       if (!allowed.has(canonicalTopicId)) continue;
-      const filteredMergeIds = mergeTopicIds.filter((id) => allowed.has(id) && id !== canonicalTopicId);
+      const filteredMergeIds = mergeTopicIds.filter((id: string) => allowed.has(id) && id !== canonicalTopicId);
       if (filteredMergeIds.length === 0) continue;
 
       const proposalKey = stableKey(
@@ -457,7 +457,7 @@ export async function autoMergeSemanticTopicsForTopicIds(opts: {
         const allowed = new Set(cand.list.map((t) => t.id));
         if (!allowed.has(canonicalTopicId)) continue;
         const filteredMergeIds = mergeTopicIds.filter(
-          (id) => allowed.has(id) && id !== canonicalTopicId
+          (id: string) => allowed.has(id) && id !== canonicalTopicId
         );
         if (filteredMergeIds.length === 0) continue;
 
