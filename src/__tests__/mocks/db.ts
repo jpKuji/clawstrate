@@ -29,6 +29,7 @@ function chainable(terminal?: unknown) {
 export function createMockDb() {
   return {
     select: vi.fn(() => chainable([{ count: 0 }])),
+    execute: vi.fn().mockResolvedValue({ rows: [] }),
     insert: vi.fn(() => chainable([{ id: "test-uuid" }])),
     update: vi.fn(() => chainable()),
     delete: vi.fn(() => chainable()),
@@ -54,6 +55,10 @@ export function createMockDb() {
         findMany: vi.fn().mockResolvedValue([]),
       },
       topics: {
+        findFirst: vi.fn().mockResolvedValue(null),
+        findMany: vi.fn().mockResolvedValue([]),
+      },
+      topicAliases: {
         findFirst: vi.fn().mockResolvedValue(null),
         findMany: vi.fn().mockResolvedValue([]),
       },

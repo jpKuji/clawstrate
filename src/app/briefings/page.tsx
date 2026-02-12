@@ -1,11 +1,12 @@
 import { PageContainer } from "@/components/layout/PageContainer";
 import { BriefingList } from "@/components/briefings/BriefingList";
+import { getSiteBaseUrl } from "@/lib/site-url";
 
 export const revalidate = 60;
 
 async function getBriefings() {
   try {
-    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:3000";
+    const baseUrl = getSiteBaseUrl();
     const res = await fetch(`${baseUrl}/api/v1/narratives`, {
       next: { revalidate: 60 },
     });

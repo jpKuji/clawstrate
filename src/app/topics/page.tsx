@@ -2,12 +2,13 @@ import { PageContainer } from "@/components/layout/PageContainer";
 import { TopicsExplorer } from "@/components/topics/TopicsExplorer";
 import { getSourceDisplayList } from "@/lib/sources/display";
 import { Suspense } from "react";
+import { getSiteBaseUrl } from "@/lib/site-url";
 
 export const revalidate = 60;
 
 async function getTopics(source: string) {
   try {
-    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:3000";
+    const baseUrl = getSiteBaseUrl();
     const params = new URLSearchParams({ limit: "50" });
     if (source !== "all") params.set("source", source);
     const res = await fetch(`${baseUrl}/api/v1/topics?${params}`, {

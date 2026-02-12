@@ -296,6 +296,9 @@ export const topics = pgTable(
     id: uuid("id").defaultRandom().primaryKey(),
     slug: text("slug").unique().notNull(), // e.g. "mcp-security", "agent-autonomy"
     name: text("name").notNull(), // Display name
+    // Stable dedupe key: normalized name (case-fold + whitespace collapse).
+    // Used to aggregate topics that share the same display name but different slugs.
+    nameKey: text("name_key").notNull(),
     description: text("description"),
     // Aggregated stats (recomputed periodically)
     actionCount: integer("action_count").default(0),
@@ -309,7 +312,20 @@ export const topics = pgTable(
   (t) => [
     index("idx_topic_velocity").on(t.velocity),
     index("idx_topic_action_count").on(t.actionCount),
+    uniqueIndex("idx_topics_name_key_unique").on(t.nameKey),
   ]
+);
+
+export const topicAliases = pgTable(
+  "topic_aliases",
+  {
+    aliasSlug: text("alias_slug").primaryKey(),
+    topicId: uuid("topic_id")
+      .references(() => topics.id)
+      .notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (t) => [index("idx_topic_aliases_topic_id").on(t.topicId)]
 );
 
 export const actionTopics = pgTable(

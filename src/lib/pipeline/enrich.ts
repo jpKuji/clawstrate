@@ -1,7 +1,9 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { createHash } from "node:crypto";
 import { db } from "../db";
-import { actions, enrichments, topics, actionTopics } from "../db/schema";
+import { actions, enrichments, topics, topicAliases, actionTopics } from "../db/schema";
 import { eq, sql } from "drizzle-orm";
+import { normalizeTopicNameKey, slugifyTopicName } from "../topics/normalize";
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const BATCH_SIZE = 10;
@@ -18,6 +20,10 @@ interface EnrichmentResult {
   intent: string;
   topics: Array<{ slug: string; name: string; relevance: number }>;
   entities: string[];
+}
+
+function hash6(input: string): string {
+  return createHash("sha256").update(input).digest("hex").slice(0, 6);
 }
 
 /**
@@ -184,51 +190,107 @@ export async function runEnrichment(): Promise<{
           // Compute deterministic content metrics
           const contentMetrics = computeContentMetrics(action.content);
 
-          // Insert enrichment
-          await db
-            .insert(enrichments)
-            .values({
-              actionId: action.id,
-              sentiment: result.sentiment,
-              autonomyScore,
-              originalityScore: result.originality,
-              independenceScore: result.behavioral_independence,
-              coordinationSignal: result.coordination_signal,
-              isSubstantive: result.isSubstantive,
-              intent: result.intent,
-              entities: result.entities,
-              topicSlugs: result.topics.map((t) => t.slug),
-              contentMetrics,
-              rawResponse: result as unknown as Record<string, unknown>,
-              model: MODEL,
-            })
-            .onConflictDoNothing();
+          // Resolve topics canonically by normalized name key (not by LLM-provided slug).
+          const topicByKey = new Map<
+            string,
+            {
+              name: string;
+              relevance: number;
+              llmSlugs: Set<string>;
+            }
+          >();
 
-          // Upsert topics and create links
-          for (const topicData of result.topics) {
-            const [topic] = await db
-              .insert(topics)
-              .values({
-                slug: topicData.slug,
-                name: topicData.name,
-                firstSeenAt: action.performedAt,
-                lastSeenAt: action.performedAt,
-              })
-              .onConflictDoUpdate({
-                target: topics.slug,
-                set: {
-                  name: topicData.name,
+          for (const t of result.topics || []) {
+            const nameKey = normalizeTopicNameKey(t.name);
+            if (!nameKey) continue;
+
+            const existing = topicByKey.get(nameKey);
+            if (!existing) {
+              topicByKey.set(nameKey, {
+                name: t.name,
+                relevance: t.relevance ?? 1,
+                llmSlugs: new Set([t.slug].filter(Boolean)),
+              });
+            } else {
+              existing.relevance = Math.max(existing.relevance, t.relevance ?? 1);
+              if (t.slug) existing.llmSlugs.add(t.slug);
+            }
+          }
+
+          const canonicalTopicSlugs: string[] = [];
+
+          for (const [nameKey, t] of topicByKey.entries()) {
+            let topic = await db.query.topics.findFirst({
+              where: eq(topics.nameKey, nameKey),
+            });
+
+            if (!topic) {
+              const baseSlug = slugifyTopicName(t.name);
+              let slugCandidate = baseSlug;
+
+              const collision = await db.query.topics.findFirst({
+                where: eq(topics.slug, slugCandidate),
+              });
+
+              if (collision && collision.nameKey !== nameKey) {
+                slugCandidate = `${baseSlug}-${hash6(nameKey)}`;
+              }
+
+              const inserted = await db
+                .insert(topics)
+                .values({
+                  slug: slugCandidate,
+                  name: t.name,
+                  nameKey,
+                  firstSeenAt: action.performedAt,
                   lastSeenAt: action.performedAt,
-                },
-              })
-              .returning();
+                })
+                .onConflictDoNothing()
+                .returning();
+
+              if (inserted.length > 0) {
+                topic = inserted[0];
+              } else {
+                topic =
+                  (await db.query.topics.findFirst({
+                    where: eq(topics.nameKey, nameKey),
+                  })) ||
+                  (await db.query.topics.findFirst({
+                    where: eq(topics.slug, slugCandidate),
+                  }));
+              }
+            } else {
+              await db
+                .update(topics)
+                .set({
+                  name: t.name,
+                  lastSeenAt: action.performedAt,
+                })
+                .where(eq(topics.id, topic.id));
+            }
+
+            if (!topic) continue;
+
+            canonicalTopicSlugs.push(topic.slug);
+
+            // Preserve LLM-provided slugs as aliases so old links/bookmarks still resolve.
+            for (const aliasSlug of t.llmSlugs) {
+              if (!aliasSlug || aliasSlug === topic.slug) continue;
+              await db
+                .insert(topicAliases)
+                .values({
+                  aliasSlug,
+                  topicId: topic.id,
+                })
+                .onConflictDoNothing();
+            }
 
             const insertedLinks = await db
               .insert(actionTopics)
               .values({
                 actionId: action.id,
                 topicId: topic.id,
-                relevance: topicData.relevance,
+                relevance: t.relevance,
               })
               .onConflictDoNothing()
               .returning({ id: actionTopics.id });
@@ -244,6 +306,26 @@ export async function runEnrichment(): Promise<{
                 .where(eq(topics.id, topic.id));
             }
           }
+
+          // Insert enrichment (store canonical slugs).
+          await db
+            .insert(enrichments)
+            .values({
+              actionId: action.id,
+              sentiment: result.sentiment,
+              autonomyScore,
+              originalityScore: result.originality,
+              independenceScore: result.behavioral_independence,
+              coordinationSignal: result.coordination_signal,
+              isSubstantive: result.isSubstantive,
+              intent: result.intent,
+              entities: result.entities,
+              topicSlugs: Array.from(new Set(canonicalTopicSlugs)),
+              contentMetrics,
+              rawResponse: result as unknown as Record<string, unknown>,
+              model: MODEL,
+            })
+            .onConflictDoNothing();
 
           // Mark action as enriched
           await db

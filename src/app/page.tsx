@@ -11,12 +11,13 @@ import { BriefingSheet } from "@/components/dashboard/BriefingSheet";
 import { SourceActivityStrip } from "@/components/dashboard/SourceActivityStrip";
 import { getSourceDisplayList } from "@/lib/sources/display";
 import { getEnabledSourceAdapters } from "@/lib/sources";
+import { getSiteBaseUrl } from "@/lib/site-url";
 
 export const revalidate = 60;
 
 async function getDashboard() {
   try {
-    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:3000";
+    const baseUrl = getSiteBaseUrl();
     const res = await fetch(`${baseUrl}/api/v1/dashboard`, {
       next: { revalidate: 60 },
     });
@@ -29,7 +30,7 @@ async function getDashboard() {
 
 async function getGraphData() {
   try {
-    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:3000";
+    const baseUrl = getSiteBaseUrl();
     const res = await fetch(
       `${baseUrl}/api/v1/graph?maxNodes=25&windowDays=14`,
       { next: { revalidate: 60 } }

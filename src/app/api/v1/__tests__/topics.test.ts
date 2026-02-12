@@ -151,7 +151,26 @@ describe("GET /api/v1/topics/[slug]", () => {
         sentiment: 0.6,
       },
     ];
-    mockDb.select.mockReturnValueOnce(chainableWith(topicActions));
+    const cooccurring = [
+      { relatedTopicId: "topic-uuid-002", cooccurrenceCount: 3 },
+    ];
+    const topContributors = [
+      { agentId: mockDbAgent.id, agentName: mockDbAgent.displayName, actionCount: 5 },
+    ];
+
+    mockDb.select
+      .mockReturnValueOnce(chainableWith(topicActions))
+      .mockReturnValueOnce(chainableWith(cooccurring))
+      .mockReturnValueOnce(chainableWith(topContributors));
+
+    mockDb.query.topics.findMany.mockResolvedValueOnce([
+      {
+        ...mockDbTopic,
+        id: "topic-uuid-002",
+        slug: "related-topic",
+        name: "Related Topic",
+      },
+    ]);
 
     const req = makeDetailRequest(mockDbTopic.slug);
     const res = await getTopic(req, {
@@ -163,6 +182,8 @@ describe("GET /api/v1/topics/[slug]", () => {
     expect(body.topic.id).toBe(mockDbTopic.id);
     expect(body.topic.slug).toBe(mockDbTopic.slug);
     expect(body.recentActions).toHaveLength(1);
+    expect(body.isAlias).toBe(false);
+    expect(body.canonicalSlug).toBe(mockDbTopic.slug);
   });
 
   it("returns 404 when topic slug is not found", async () => {
@@ -176,5 +197,48 @@ describe("GET /api/v1/topics/[slug]", () => {
 
     expect(res.status).toBe(404);
     expect(body.error).toBe("Not found");
+  });
+
+  it("resolves topic alias slugs to canonical topic", async () => {
+    mockDb.query.topics.findFirst
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(mockDbTopic);
+
+    mockDb.query.topicAliases.findFirst.mockResolvedValueOnce({
+      aliasSlug: "old-slug",
+      topicId: mockDbTopic.id,
+      createdAt: new Date(),
+    });
+
+    mockDb.select
+      .mockReturnValueOnce(chainableWith([]))
+      .mockReturnValueOnce(chainableWith([]))
+      .mockReturnValueOnce(chainableWith([]));
+
+    mockDb.query.topics.findMany.mockResolvedValueOnce([]);
+
+    const req = makeDetailRequest("old-slug");
+    const res = await getTopic(req, {
+      params: Promise.resolve({ slug: "old-slug" }),
+    });
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.isAlias).toBe(true);
+    expect(body.requestedSlug).toBe("old-slug");
+    expect(body.canonicalSlug).toBe(mockDbTopic.slug);
+  });
+
+  it("returns JSON 500 on unexpected errors", async () => {
+    mockDb.query.topics.findFirst.mockRejectedValueOnce(new Error("boom"));
+
+    const req = makeDetailRequest(mockDbTopic.slug);
+    const res = await getTopic(req, {
+      params: Promise.resolve({ slug: mockDbTopic.slug }),
+    });
+    const body = await res.json();
+
+    expect(res.status).toBe(500);
+    expect(body.error).toBe("Internal Server Error");
   });
 });

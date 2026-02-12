@@ -8,12 +8,13 @@ import { MetricStrip } from "@/components/briefings/MetricStrip";
 import { Activity, Users, Clock, Gauge } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { notFound } from "next/navigation";
+import { getSiteBaseUrl } from "@/lib/site-url";
 
 export const revalidate = 60;
 
 async function getBriefing(id: string) {
   try {
-    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:3000";
+    const baseUrl = getSiteBaseUrl();
     const res = await fetch(`${baseUrl}/api/v1/narratives?id=${id}`, {
       next: { revalidate: 60 },
     });
