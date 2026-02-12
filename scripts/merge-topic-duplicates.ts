@@ -174,6 +174,25 @@ async function main() {
         sql`DELETE FROM topic_cooccurrences WHERE topic_id_1 = ${oldId} OR topic_id_2 = ${oldId}`
       );
 
+      // Re-point topic_aliases from old topic to canonical.
+      await db.execute(sql`
+        UPDATE topic_aliases SET topic_id = ${canonicalId}
+        WHERE topic_id = ${oldId}
+        AND alias_slug NOT IN (SELECT alias_slug FROM topic_aliases WHERE topic_id = ${canonicalId})
+      `);
+      await db.execute(sql`DELETE FROM topic_aliases WHERE topic_id = ${oldId}`);
+
+      // Re-point topic_name_aliases from old topic to canonical.
+      await db.execute(sql`
+        UPDATE topic_name_aliases SET topic_id = ${canonicalId}
+        WHERE topic_id = ${oldId}
+        AND alias_name_key NOT IN (SELECT alias_name_key FROM topic_name_aliases WHERE topic_id = ${canonicalId})
+      `);
+      await db.execute(sql`DELETE FROM topic_name_aliases WHERE topic_id = ${oldId}`);
+
+      // Remove any merge proposals referencing the old topic.
+      await db.execute(sql`DELETE FROM topic_merge_proposals WHERE canonical_topic_id = ${oldId}`);
+
       // Remove the old topic row.
       await db.execute(sql`DELETE FROM topics WHERE id = ${oldId}`);
     }
