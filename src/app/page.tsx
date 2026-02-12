@@ -13,7 +13,7 @@ import { getSourceDisplayList } from "@/lib/sources/display";
 import { getEnabledSourceAdapters } from "@/lib/sources";
 import { getSiteBaseUrl } from "@/lib/site-url";
 
-export const revalidate = 60;
+export const dynamic = "force-dynamic";
 
 async function getDashboard() {
   try {

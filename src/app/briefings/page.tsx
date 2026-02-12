@@ -2,7 +2,7 @@ import { PageContainer } from "@/components/layout/PageContainer";
 import { BriefingList } from "@/components/briefings/BriefingList";
 import { getSiteBaseUrl } from "@/lib/site-url";
 
-export const revalidate = 60;
+export const dynamic = "force-dynamic";
 
 async function getBriefings() {
   try {

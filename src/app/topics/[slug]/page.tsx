@@ -3,7 +3,7 @@ import { TopicDetail } from "@/components/topics/TopicDetail";
 import { notFound, redirect } from "next/navigation";
 import { getSiteBaseUrl } from "@/lib/site-url";
 
-export const revalidate = 60;
+export const dynamic = "force-dynamic";
 
 type TopicFetchResult =
   | { kind: "ok"; data: any }

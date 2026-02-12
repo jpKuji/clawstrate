@@ -4,7 +4,7 @@ import { getSourceDisplayList } from "@/lib/sources/display";
 import { Suspense } from "react";
 import { getSiteBaseUrl } from "@/lib/site-url";
 
-export const revalidate = 60;
+export const dynamic = "force-dynamic";
 
 async function getAgents(source: string) {
   try {

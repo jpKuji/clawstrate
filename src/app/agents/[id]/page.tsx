@@ -4,7 +4,7 @@ import { HumanProfile } from "@/components/agents/HumanProfile";
 import { notFound } from "next/navigation";
 import { getSiteBaseUrl } from "@/lib/site-url";
 
-export const revalidate = 60;
+export const dynamic = "force-dynamic";
 
 async function getAgent(id: string) {
   try {
