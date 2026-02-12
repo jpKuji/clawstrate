@@ -68,15 +68,17 @@ export async function GET(
     }> = [];
 
     try {
-      cooccurring = await db
+      // Avoid grouping by a parameterized CASE expression.
+      // With Drizzle + neon-http, repeating `${topic.id}` produces different $N placeholders in
+      // SELECT vs GROUP BY, which Postgres treats as different expressions (42803).
+      const pairs = await db
         .select({
+          topicId1: topicCooccurrences.topicId1,
+          topicId2: topicCooccurrences.topicId2,
           cooccurrenceCount:
             sql<number>`SUM(${topicCooccurrences.cooccurrenceCount})`.as(
               "cooccurrence_count"
             ),
-          relatedTopicId: sql<string>`CASE WHEN ${topicCooccurrences.topicId1} = ${topic.id} THEN ${topicCooccurrences.topicId2} ELSE ${topicCooccurrences.topicId1} END`.as(
-            "related_topic_id"
-          ),
         })
         .from(topicCooccurrences)
         .where(
@@ -85,9 +87,7 @@ export async function GET(
             eq(topicCooccurrences.topicId2, topic.id)
           )
         )
-        .groupBy(
-          sql`CASE WHEN ${topicCooccurrences.topicId1} = ${topic.id} THEN ${topicCooccurrences.topicId2} ELSE ${topicCooccurrences.topicId1} END`
-        )
+        .groupBy(topicCooccurrences.topicId1, topicCooccurrences.topicId2)
         .orderBy(
           desc(
             sql<number>`SUM(${topicCooccurrences.cooccurrenceCount})`.as(
@@ -96,6 +96,11 @@ export async function GET(
           )
         )
         .limit(10);
+
+      cooccurring = pairs.map((p) => ({
+        cooccurrenceCount: p.cooccurrenceCount,
+        relatedTopicId: p.topicId1 === topic.id ? p.topicId2 : p.topicId1,
+      }));
     } catch (e: any) {
       console.error("topic co-occurrence query failed", {
         slug,

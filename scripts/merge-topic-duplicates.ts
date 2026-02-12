@@ -18,11 +18,11 @@ async function main() {
   console.log(`[merge-topics] starting${dryRun ? " (dry-run)" : ""}`);
 
   if (!dryRun) {
-    // Backfill name_key for existing rows.
+    // (Re)compute name_key from display name for *all* rows.
+    // We don't trust existing values: earlier pipeline versions may have populated name_key incorrectly.
     await db.execute(sql`
       UPDATE topics
       SET name_key = lower(trim(regexp_replace(name, '[[:space:]]+', ' ', 'g')))
-      WHERE name_key IS NULL OR name_key = ''
     `);
   }
 
@@ -93,14 +93,14 @@ async function main() {
         UPDATE topics
         SET
           first_seen_at = CASE
-            WHEN topics.first_seen_at IS NULL THEN ${old.first_seen_at}
-            WHEN ${old.first_seen_at} IS NULL THEN topics.first_seen_at
-            ELSE LEAST(topics.first_seen_at, ${old.first_seen_at})
+            WHEN topics.first_seen_at IS NULL THEN ${old.first_seen_at}::timestamp
+            WHEN ${old.first_seen_at}::timestamp IS NULL THEN topics.first_seen_at
+            ELSE LEAST(topics.first_seen_at, ${old.first_seen_at}::timestamp)
           END,
           last_seen_at = CASE
-            WHEN topics.last_seen_at IS NULL THEN ${old.last_seen_at}
-            WHEN ${old.last_seen_at} IS NULL THEN topics.last_seen_at
-            ELSE GREATEST(topics.last_seen_at, ${old.last_seen_at})
+            WHEN topics.last_seen_at IS NULL THEN ${old.last_seen_at}::timestamp
+            WHEN ${old.last_seen_at}::timestamp IS NULL THEN topics.last_seen_at
+            ELSE GREATEST(topics.last_seen_at, ${old.last_seen_at}::timestamp)
           END
         WHERE id = ${canonicalId}
       `);
