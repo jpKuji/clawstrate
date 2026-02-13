@@ -9,7 +9,7 @@ import { detectCoordination, detectCommunities } from "@/lib/pipeline/coordinati
 import { generateBriefing } from "@/lib/pipeline/briefing";
 import { PIPELINE_STAGE_ORDER, type PipelineStageName } from "@/lib/pipeline/metadata";
 import { acquireLock, invalidateApiCaches } from "@/lib/redis";
-import { and, eq } from "drizzle-orm";
+import { and, eq, desc } from "drizzle-orm";
 
 export const maxDuration = 300;
 
@@ -59,19 +59,28 @@ async function handler(req: NextRequest) {
 
   let dependencyFailed = false;
   let hadRecoverableErrors = false;
+  let dataChanged = false;
+  let skipNoNewData = false;
+
+  // Heavy stages that can be skipped when no new data was ingested/enriched
+  // and a recent analysis already exists.
+  const HEAVY_STAGES: StageName[] = ["analyze", "aggregate", "coordination", "briefing"];
+  const FOUR_HOURS_MS = 4 * 60 * 60 * 1000;
 
   try {
     for (const stage of STAGES) {
-      if (dependencyFailed) {
+      // Skip logic: upstream failure OR no-new-data fast path
+      if (dependencyFailed || (skipNoNewData && HEAVY_STAGES.includes(stage))) {
+        const reason = dependencyFailed
+          ? "upstream stage failed"
+          : "no_new_data";
         const [skipped] = await db
           .insert(pipelineStageRuns)
           .values({
             pipelineRunId: run.id,
             stage,
             status: "skipped",
-            result: {
-              reason: "upstream stage failed",
-            },
+            result: { reason },
             completedAt: new Date(),
             durationMs: 0,
           })
@@ -79,7 +88,7 @@ async function handler(req: NextRequest) {
             target: [pipelineStageRuns.pipelineRunId, pipelineStageRuns.stage],
             set: {
               status: "skipped",
-              result: { reason: "upstream stage failed" },
+              result: { reason },
               completedAt: new Date(),
               durationMs: 0,
             },
@@ -90,7 +99,7 @@ async function handler(req: NextRequest) {
           stage,
           status: "skipped",
           durationMs: skipped.durationMs || 0,
-          result: { reason: "upstream stage failed" },
+          result: { reason },
         });
         continue;
       }
@@ -136,6 +145,39 @@ async function handler(req: NextRequest) {
           durationMs,
           result,
         });
+
+        // Track whether ingest/enrich produced new data
+        if (stage === "ingest") {
+          const r = result as { postsIngested?: number; commentsIngested?: number };
+          if ((r.postsIngested || 0) > 0 || (r.commentsIngested || 0) > 0) {
+            dataChanged = true;
+          }
+        }
+
+        if (stage === "enrich") {
+          const r = result as { enriched?: number };
+          if ((r.enriched || 0) > 0) {
+            dataChanged = true;
+          }
+
+          // After enrich: decide whether to skip heavy stages
+          if (!dataChanged) {
+            const lastAnalyze = await db.query.pipelineStageRuns.findFirst({
+              where: and(
+                eq(pipelineStageRuns.stage, "analyze"),
+                eq(pipelineStageRuns.status, "completed")
+              ),
+              orderBy: [desc(pipelineStageRuns.completedAt)],
+            });
+
+            if (
+              lastAnalyze?.completedAt &&
+              Date.now() - lastAnalyze.completedAt.getTime() < FOUR_HOURS_MS
+            ) {
+              skipNoNewData = true;
+            }
+          }
+        }
       } catch (e: any) {
         const durationMs = Date.now() - stageStartedAt.getTime();
         dependencyFailed = true;

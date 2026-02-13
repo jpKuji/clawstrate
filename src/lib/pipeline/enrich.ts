@@ -48,6 +48,20 @@ function computeContentMetrics(content: string | null) {
   };
 }
 
+function isRentAHumanDeterministicAction(action: {
+  platformId: string;
+  actionType: string;
+  rawData: Record<string, unknown> | null;
+}): boolean {
+  if (action.platformId !== "rentahuman") return false;
+  if (action.actionType === "post") return false;
+  const kind =
+    action.rawData && typeof action.rawData.kind === "string"
+      ? action.rawData.kind
+      : null;
+  return kind === "assignment" || action.actionType === "comment";
+}
+
 const ENRICHMENT_PROMPT = `You are a behavioral intelligence analyst specializing in AI agent behavior across multiple integrated platforms (social + marketplaces).
 
 Your job is to classify agent actions using signals designed to detect genuine autonomy, coordination, and behavioral patterns specific to AI agents — NOT generic social media analytics.
@@ -100,7 +114,7 @@ export async function runEnrichment(): Promise<{
   const unenriched = await db.query.actions.findMany({
     where: eq(actions.isEnriched, false),
     orderBy: (a, { desc }) => [desc(a.performedAt)],
-    limit: 100, // Process up to 100 per run
+    limit: 50, // Process up to 50 per run (reduced from 100 to stay within function timeout)
   });
 
   if (unenriched.length === 0) {
@@ -108,11 +122,61 @@ export async function runEnrichment(): Promise<{
     return { enriched: 0, errors: [] };
   }
 
-  console.log(`[enrich] Processing ${unenriched.length} actions`);
+  const deterministicActions = unenriched.filter((action) =>
+    isRentAHumanDeterministicAction(action)
+  );
+  const llmCandidates = unenriched.filter(
+    (action) => !isRentAHumanDeterministicAction(action)
+  );
+
+  console.log(
+    `[enrich] Processing ${unenriched.length} actions (${llmCandidates.length} llm, ${deterministicActions.length} deterministic)`
+  );
+
+  for (const action of deterministicActions) {
+    try {
+      const contentMetrics = computeContentMetrics(action.content);
+      await db
+        .insert(enrichments)
+        .values({
+          actionId: action.id,
+          sentiment: 0,
+          autonomyScore: 0,
+          originalityScore: 0,
+          independenceScore: 0,
+          coordinationSignal: 0,
+          isSubstantive: false,
+          intent: "marketplace_assignment",
+          entities: [],
+          topicSlugs: [],
+          contentMetrics,
+          rawResponse: {
+            strategy: "deterministic",
+            reason: "rentahuman_assignment_comment",
+          },
+          model: "deterministic-rentahuman-v1",
+        })
+        .onConflictDoNothing();
+
+      await db
+        .update(actions)
+        .set({ isEnriched: true })
+        .where(eq(actions.id, action.id));
+
+      enrichedCount++;
+      enrichedPlatforms.add(action.platformId);
+    } catch (e: any) {
+      errors.push(`deterministic enrichment ${action.platformActionId}: ${e.message}`);
+    }
+  }
+
+  if (llmCandidates.length === 0) {
+    return { enriched: enrichedCount, errors };
+  }
 
   // Pre-fetch parent context for actions that have parentActionId
   const parentContextMap = new Map<string, { title: string | null; content: string | null }>();
-  const actionsWithParent = unenriched.filter((a) => a.parentActionId);
+  const actionsWithParent = llmCandidates.filter((a) => a.parentActionId);
   for (const action of actionsWithParent) {
     if (action.parentActionId && !parentContextMap.has(action.parentActionId)) {
       const parent = await db.query.actions.findFirst({
@@ -128,8 +192,8 @@ export async function runEnrichment(): Promise<{
   }
 
   // Process in batches
-  for (let i = 0; i < unenriched.length; i += BATCH_SIZE) {
-    const batch = unenriched.slice(i, i + BATCH_SIZE);
+  for (let i = 0; i < llmCandidates.length; i += BATCH_SIZE) {
+    const batch = llmCandidates.slice(i, i + BATCH_SIZE);
 
     // Format batch for the prompt — include parent context when available
     const actionsText = batch

@@ -235,8 +235,22 @@ async function normalizeAndValidateCitations(
 
 /**
  * Generate a narrative briefing. Call every 6 hours.
+ * Skips if a recent briefing of the same type exists (within 5 hours).
  */
 export async function generateBriefing(): Promise<{ narrativeId: string }> {
+  const fiveHoursAgo = new Date(Date.now() - 5 * 60 * 60 * 1000);
+  const lastBriefing = await db.query.narratives.findFirst({
+    where: eq(narratives.type, "briefing_6h"),
+    orderBy: (n, { desc }) => [desc(n.generatedAt)],
+  });
+
+  if (lastBriefing?.generatedAt && lastBriefing.generatedAt > fiveHoursAgo) {
+    console.log(
+      `[briefing] Skipped — last briefing was ${lastBriefing.generatedAt.toISOString()} (within 5h)`
+    );
+    return { narrativeId: "skipped", skipped: true, reason: "recent_briefing_exists" } as any;
+  }
+
   return generateNarrativeBriefing({
     type: "briefing_6h",
     lookbackHours: 6,
