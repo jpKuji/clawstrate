@@ -114,7 +114,7 @@ export async function runEnrichment(): Promise<{
   const unenriched = await db.query.actions.findMany({
     where: eq(actions.isEnriched, false),
     orderBy: (a, { desc }) => [desc(a.performedAt)],
-    limit: 50, // Process up to 50 per run (reduced from 100 to stay within function timeout)
+    limit: 30, // Process up to 30 per run (reduced to stay within 300s function timeout)
   });
 
   if (unenriched.length === 0) {
