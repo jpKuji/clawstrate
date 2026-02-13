@@ -57,23 +57,38 @@ async function handler(req: NextRequest) {
     error?: string;
   }> = [];
 
+  const pipelineStartMs = Date.now();
   let dependencyFailed = false;
   let hadRecoverableErrors = false;
   let dataChanged = false;
-  let skipNoNewData = false;
+  let skipRemainingStages = false;
 
-  // Heavy stages that can be skipped when no new data was ingested/enriched
-  // and a recent analysis already exists.
+  // Heavy stages that can be skipped when budget is tight or no new data
   const HEAVY_STAGES: StageName[] = ["analyze", "aggregate", "coordination", "briefing"];
+  // Minimum time budget (ms) needed to start a heavy stage
+  const HEAVY_STAGE_MIN_BUDGET_MS = 120_000; // 120s — won't start heavy stages with <120s remaining
+  const MAX_BUDGET_MS = 280_000; // 280s out of 300s, leave 20s margin for cleanup
   const FOUR_HOURS_MS = 4 * 60 * 60 * 1000;
 
   try {
     for (const stage of STAGES) {
-      // Skip logic: upstream failure OR no-new-data fast path
-      if (dependencyFailed || (skipNoNewData && HEAVY_STAGES.includes(stage))) {
+      // Time-budget check for heavy stages
+      if (!skipRemainingStages && HEAVY_STAGES.includes(stage)) {
+        const elapsedMs = Date.now() - pipelineStartMs;
+        const remainingMs = MAX_BUDGET_MS - elapsedMs;
+        if (remainingMs < HEAVY_STAGE_MIN_BUDGET_MS) {
+          skipRemainingStages = true;
+          console.log(
+            `[pipeline] Skipping ${stage}+ — only ${Math.round(remainingMs / 1000)}s remaining (need ${HEAVY_STAGE_MIN_BUDGET_MS / 1000}s)`
+          );
+        }
+      }
+
+      // Skip logic: upstream failure, time budget, or no-new-data fast path
+      if (dependencyFailed || skipRemainingStages) {
         const reason = dependencyFailed
           ? "upstream stage failed"
-          : "no_new_data";
+          : "time_budget";
         const [skipped] = await db
           .insert(pipelineStageRuns)
           .values({
@@ -160,7 +175,7 @@ async function handler(req: NextRequest) {
             dataChanged = true;
           }
 
-          // After enrich: decide whether to skip heavy stages
+          // After enrich: if no new data AND recent analysis exists, skip heavy stages
           if (!dataChanged) {
             const lastAnalyze = await db.query.pipelineStageRuns.findFirst({
               where: and(
@@ -174,7 +189,7 @@ async function handler(req: NextRequest) {
               lastAnalyze?.completedAt &&
               Date.now() - lastAnalyze.completedAt.getTime() < FOUR_HOURS_MS
             ) {
-              skipNoNewData = true;
+              skipRemainingStages = true;
             }
           }
         }
