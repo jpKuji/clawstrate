@@ -1,6 +1,6 @@
 import { PageContainer } from "@/components/layout/PageContainer";
 import { AgentProfile } from "@/components/agents/AgentProfile";
-import { HumanProfile } from "@/components/agents/HumanProfile";
+import { MarketplaceAgentProfile } from "@/components/agents/MarketplaceAgentProfile";
 import { notFound } from "next/navigation";
 import { getSiteBaseUrl } from "@/lib/site-url";
 
@@ -29,13 +29,13 @@ export default async function AgentPage({
 
   if (!data) notFound();
 
-  if (data.actorKind === "human") {
+  if (data.profileVariant === "marketplace_ai") {
     return (
       <PageContainer backHref="/agents" backLabel="All agents">
-        <HumanProfile
+        <MarketplaceAgentProfile
           agent={data.agent}
-          profile={data.profile}
-          assignments={data.assignments}
+          marketplaceMetrics={data.marketplaceMetrics}
+          recentActions={data.recentActions}
         />
       </PageContainer>
     );

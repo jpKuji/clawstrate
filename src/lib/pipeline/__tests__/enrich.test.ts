@@ -262,4 +262,23 @@ describe("runEnrichment", () => {
       })
     );
   });
+
+  it("uses deterministic enrichment for RentAHuman assignment comments", async () => {
+    const assignmentAction = {
+      ...mockDbAction,
+      id: "assignment-action-1",
+      platformId: "rentahuman",
+      actionType: "comment",
+      platformActionId: "assignment_b1_h1",
+      rawData: { kind: "assignment" },
+      isEnriched: false,
+    };
+    mockFindMany.mockResolvedValue([assignmentAction]);
+
+    const result = await runEnrichment();
+
+    expect(result.enriched).toBe(1);
+    expect(mockAnthropicCreate).not.toHaveBeenCalled();
+    expect(mockInsert).toHaveBeenCalled();
+  });
 });

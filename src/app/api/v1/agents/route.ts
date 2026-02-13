@@ -1,8 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { agents, agentIdentities } from "@/lib/db/schema";
-import { desc, asc, eq, sql, inArray } from "drizzle-orm";
+import { desc, asc, sql, inArray } from "drizzle-orm";
 import { cacheGet, cacheSet } from "@/lib/redis";
+import {
+  actorKindFromRawProfile,
+  formatAgentDisplayLabel,
+  resolveActorKind,
+  sourceProfileTypeFromPlatforms,
+} from "@/lib/agents/classify";
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
@@ -10,9 +16,10 @@ export async function GET(req: NextRequest) {
   const sortBy = searchParams.get("sort") || "influence"; // influence, autonomy, activity, recent
   const order = searchParams.get("order") || "desc";
   const source = searchParams.get("source") || "all";
+  const actor = searchParams.get("actor") === "all" ? "all" : "ai";
 
   // Check cache first
-  const cacheKey = `agents:${sortBy}:${order}:${limit}:${source}`;
+  const cacheKey = `agents:${sortBy}:${order}:${limit}:${source}:${actor}`;
   const cached = await cacheGet<any>(cacheKey);
   if (cached) {
     return NextResponse.json(typeof cached === "string" ? JSON.parse(cached) : cached);
@@ -32,17 +39,18 @@ export async function GET(req: NextRequest) {
 
     const results = await db.query.agents.findMany({
       where: (() => {
-        const humanFilter = sql`NOT EXISTS (
+        const aiOnlyFilter = sql`NOT EXISTS (
           SELECT 1 FROM agent_identities ai
           WHERE ai.agent_id = ${agents.id}
             AND (ai.raw_profile->>'actorKind') = 'human'
         )`;
-        if (source === "all") return humanFilter;
+        const actorFilter = actor === "all" ? sql`TRUE` : aiOnlyFilter;
+        if (source === "all") return actorFilter;
         return sql`EXISTS (
           SELECT 1 FROM agent_identities ai
           WHERE ai.agent_id = ${agents.id}
             AND ai.platform_id = ${source}
-        ) AND ${humanFilter}`;
+        ) AND ${actorFilter}`;
       })(),
       orderBy: [orderFn(sortField)],
       limit,
@@ -56,30 +64,48 @@ export async function GET(req: NextRequest) {
             .select({
               agentId: agentIdentities.agentId,
               platformId: agentIdentities.platformId,
+              platformUserId: agentIdentities.platformUserId,
               rawProfile: agentIdentities.rawProfile,
             })
             .from(agentIdentities)
             .where(inArray(agentIdentities.agentId, agentIds))
         : [];
 
-    const platformMap = new Map<string, string[]>();
-    const actorKindMap = new Map<string, string>();
-    for (const row of identities) {
-      const list = platformMap.get(row.agentId) || [];
-      list.push(row.platformId);
-      platformMap.set(row.agentId, list);
-
-      const kind = (row.rawProfile as Record<string, unknown>)?.actorKind;
-      if (kind && !actorKindMap.has(row.agentId)) {
-        actorKindMap.set(row.agentId, kind as string);
-      }
+    const identityMap = new Map<string, typeof identities>();
+    for (const identity of identities) {
+      const list = identityMap.get(identity.agentId) || [];
+      list.push(identity);
+      identityMap.set(identity.agentId, list);
     }
 
-    const enrichedResults = results.map((a) => ({
-      ...a,
-      platformIds: platformMap.get(a.id) || [],
-      actorKind: actorKindMap.get(a.id) || "ai",
-    }));
+    const enrichedResults = results.map((a) => {
+      const agentIdentities = identityMap.get(a.id) || [];
+      const platformIds = Array.from(
+        new Set(agentIdentities.map((i) => i.platformId))
+      );
+      const resolvedActorKind = resolveActorKind(
+        agentIdentities.map((i) => actorKindFromRawProfile(i.rawProfile))
+      );
+      const sourceProfileType = sourceProfileTypeFromPlatforms(platformIds);
+      const identityForLabel =
+        (source !== "all"
+          ? agentIdentities.find((i) => i.platformId === source)
+          : undefined) ||
+        agentIdentities.find((i) => i.platformId === "rentahuman") ||
+        agentIdentities[0];
+
+      return {
+        ...a,
+        platformIds,
+        actorKind: resolvedActorKind,
+        sourceProfileType,
+        displayLabel: formatAgentDisplayLabel({
+          displayName: a.displayName,
+          platformId: identityForLabel?.platformId,
+          platformUserId: identityForLabel?.platformUserId,
+        }),
+      };
+    });
 
     // Cache for 60 seconds
     await cacheSet(cacheKey, enrichedResults, 60);

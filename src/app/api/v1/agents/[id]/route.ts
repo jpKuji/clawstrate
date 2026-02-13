@@ -1,10 +1,23 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { agents, actions, enrichments, agentProfiles, interactions, coordinationSignals } from "@/lib/db/schema";
-import { eq, desc, sql, count, inArray } from "drizzle-orm";
+import {
+  agents,
+  actions,
+  agentProfiles,
+  interactions,
+  coordinationSignals,
+} from "@/lib/db/schema";
+import { eq, desc, sql, count, inArray, and } from "drizzle-orm";
+import {
+  actorKindFromRawProfile,
+  formatAgentDisplayLabel,
+  resolveActorKind,
+  sourceProfileTypeFromPlatforms,
+} from "@/lib/agents/classify";
+import { computeMarketplaceAgentMetrics } from "@/lib/pipeline/analyze";
 
 export async function GET(
-  req: NextRequest,
+  _req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
@@ -19,73 +32,59 @@ export async function GET(
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
-  // Detect actor kind from identity rawProfile
-  const actorKind = agent.identities?.find(
-    (i: any) => (i.rawProfile as any)?.actorKind
-  )?.rawProfile?.actorKind || "ai";
+  const identities = agent.identities || [];
+  const platformIds = Array.from(new Set(identities.map((i) => i.platformId)));
+  const actorKind = resolveActorKind(
+    identities.map((i) => actorKindFromRawProfile(i.rawProfile))
+  );
 
-  if (actorKind === "human") {
-    const profile = agent.identities?.find(
-      (i: any) => (i.rawProfile as any)?.actorKind === "human"
-    )?.rawProfile || {};
+  // /agents surfaces are AI-only.
+  if (actorKind !== "ai") {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
 
-    // Their actions are assignment comments — join with parent bounty posts
-    const assignments = await db.query.actions.findMany({
-      where: eq(actions.agentId, id),
-      orderBy: [desc(actions.performedAt)],
-      limit: 50,
-    });
+  const profileVariant = sourceProfileTypeFromPlatforms(platformIds);
+  const rentAHumanIdentity =
+    identities.find((i) => i.platformId === "rentahuman") || identities[0];
+  const displayLabel = formatAgentDisplayLabel({
+    displayName: agent.displayName,
+    platformId: rentAHumanIdentity?.platformId,
+    platformUserId: rentAHumanIdentity?.platformUserId,
+  });
 
-    // Fetch parent bounty details
-    const parentIds = assignments.map(a => a.parentActionId).filter(Boolean) as string[];
-    const bountyPosts = parentIds.length > 0
-      ? await db.query.actions.findMany({ where: inArray(actions.id, parentIds) })
-      : [];
-    const bountyMap = new Map(bountyPosts.map(b => [b.id, b]));
-
-    // Get bounty creator display names
-    const creatorIds = [...new Set(bountyPosts.map(b => b.agentId).filter(Boolean))] as string[];
-    const creators = creatorIds.length > 0
-      ? await db.query.agents.findMany({ where: inArray(agents.id, creatorIds) })
-      : [];
-    const creatorMap = new Map(creators.map(c => [c.id, c]));
-
-    const enrichedAssignments = assignments.map(a => {
-      const bounty = a.parentActionId ? bountyMap.get(a.parentActionId) : null;
-      const creator = bounty?.agentId ? creatorMap.get(bounty.agentId) : null;
-      return {
-        id: a.id,
-        performedAt: a.performedAt,
-        bounty: bounty ? {
-          title: bounty.title,
-          category: (bounty.rawData as any)?.category,
-          price: (bounty.rawData as any)?.price,
-          priceType: (bounty.rawData as any)?.priceType,
-          currency: (bounty.rawData as any)?.currency,
-          skillsNeeded: (bounty.rawData as any)?.skillsNeeded,
-          url: bounty.url,
-          creatorName: creator?.displayName || "Unknown",
-          creatorId: creator?.id,
-        } : null,
-      };
-    });
+  if (profileVariant === "marketplace_ai") {
+    const [marketplaceMetrics, recentBounties] = await Promise.all([
+      computeMarketplaceAgentMetrics(id),
+      db.query.actions.findMany({
+        where: and(
+          eq(actions.agentId, id),
+          eq(actions.platformId, "rentahuman"),
+          eq(actions.actionType, "post")
+        ),
+        orderBy: [desc(actions.performedAt)],
+        limit: 20,
+      }),
+    ]);
 
     return NextResponse.json({
-      actorKind: "human",
+      actorKind: "ai",
+      profileVariant: "marketplace_ai",
+      sourceProfileType: "marketplace_ai",
+      displayLabel,
       agent: {
-        id: agent.id,
-        displayName: agent.displayName,
-        description: agent.description,
-        firstSeenAt: agent.firstSeenAt,
-        lastSeenAt: agent.lastSeenAt,
-        totalActions: agent.totalActions,
+        ...agent,
+        displayLabel,
       },
-      profile,
-      assignments: enrichedAssignments,
+      marketplaceMetrics,
+      recentActions: recentBounties,
+      profileHistory: [],
+      percentiles: null,
+      egoGraph: null,
+      coordinationFlags: [],
     });
   }
 
-  // Recent actions
+  // Forum profile: keep existing behavior.
   const recentActions = await db.query.actions.findMany({
     where: eq(actions.agentId, id),
     orderBy: [desc(actions.performedAt)],
@@ -95,25 +94,30 @@ export async function GET(
     },
   });
 
-  // Profile history (for trend charts)
   const profileHistory = await db.query.agentProfiles.findMany({
     where: eq(agentProfiles.agentId, id),
     orderBy: [desc(agentProfiles.snapshotAt)],
     limit: 50,
   });
 
-  // Compute percentiles
   const totalAgentCount = await db.select({ count: count(agents.id) }).from(agents);
   const total = Number(totalAgentCount[0]?.count) || 1;
 
-  const [influencePercentile, autonomyPercentile, activityPercentile] = await Promise.all([
-    db.select({ count: count(agents.id) }).from(agents)
-      .where(sql`${agents.influenceScore} <= ${agent.influenceScore ?? 0}`),
-    db.select({ count: count(agents.id) }).from(agents)
-      .where(sql`${agents.autonomyScore} <= ${agent.autonomyScore ?? 0}`),
-    db.select({ count: count(agents.id) }).from(agents)
-      .where(sql`${agents.activityScore} <= ${agent.activityScore ?? 0}`),
-  ]);
+  const [influencePercentile, autonomyPercentile, activityPercentile] =
+    await Promise.all([
+      db
+        .select({ count: count(agents.id) })
+        .from(agents)
+        .where(sql`${agents.influenceScore} <= ${agent.influenceScore ?? 0}`),
+      db
+        .select({ count: count(agents.id) })
+        .from(agents)
+        .where(sql`${agents.autonomyScore} <= ${agent.autonomyScore ?? 0}`),
+      db
+        .select({ count: count(agents.id) })
+        .from(agents)
+        .where(sql`${agents.activityScore} <= ${agent.activityScore ?? 0}`),
+    ]);
 
   const percentiles = {
     influence: Math.round((Number(influencePercentile[0]?.count) / total) * 100),
@@ -121,7 +125,6 @@ export async function GET(
     activity: Math.round((Number(activityPercentile[0]?.count) / total) * 100),
   };
 
-  // Ego graph — agents this agent interacts with
   const outgoing = await db
     .select({
       targetId: interactions.targetAgentId,
@@ -146,36 +149,47 @@ export async function GET(
     .orderBy(sql`SUM(${interactions.weight}) DESC`)
     .limit(10);
 
-  // Get display names for neighbors
-  const neighborIds = [...new Set([...outgoing.map(o => o.targetId), ...incoming.map(i => i.sourceId)])];
-  const neighborAgents = neighborIds.length > 0
-    ? await db.query.agents.findMany({
-        where: inArray(agents.id, neighborIds),
-      })
-    : [];
+  const neighborIds = [
+    ...new Set([...outgoing.map((o) => o.targetId), ...incoming.map((i) => i.sourceId)]),
+  ];
+  const neighborAgents =
+    neighborIds.length > 0
+      ? await db.query.agents.findMany({
+          where: inArray(agents.id, neighborIds),
+        })
+      : [];
 
   const egoGraph = {
-    outgoing: outgoing.map(o => ({
+    outgoing: outgoing.map((o) => ({
       ...o,
-      displayName: neighborAgents.find(a => a.id === o.targetId)?.displayName || "Unknown",
+      displayName:
+        neighborAgents.find((a) => a.id === o.targetId)?.displayName || "Unknown",
     })),
-    incoming: incoming.map(i => ({
+    incoming: incoming.map((i) => ({
       ...i,
-      displayName: neighborAgents.find(a => a.id === i.sourceId)?.displayName || "Unknown",
+      displayName:
+        neighborAgents.find((a) => a.id === i.sourceId)?.displayName || "Unknown",
     })),
   };
 
-  // Coordination flags
   const coordFlags = await db
     .select()
     .from(coordinationSignals)
-    .where(sql`${coordinationSignals.agentIds}::jsonb @> ${JSON.stringify([id])}::jsonb`)
+    .where(
+      sql`${coordinationSignals.agentIds}::jsonb @> ${JSON.stringify([id])}::jsonb`
+    )
     .orderBy(desc(coordinationSignals.detectedAt))
     .limit(5);
 
   return NextResponse.json({
     actorKind: "ai",
-    agent,
+    profileVariant: "forum_ai",
+    sourceProfileType: "forum_ai",
+    displayLabel,
+    agent: {
+      ...agent,
+      displayLabel,
+    },
     recentActions,
     profileHistory,
     percentiles,

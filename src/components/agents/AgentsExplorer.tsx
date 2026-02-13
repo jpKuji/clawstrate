@@ -9,6 +9,7 @@ import type { SourceDisplayConfig } from "@/lib/sources/display";
 interface Agent {
   id: string;
   displayName: string;
+  displayLabel?: string;
   influenceScore: number | null;
   autonomyScore: number | null;
   activityScore: number | null;
@@ -17,6 +18,7 @@ interface Agent {
   lastSeenAt: string;
   platformIds?: string[];
   actorKind?: string;
+  sourceProfileType?: "forum_ai" | "marketplace_ai";
 }
 
 export function AgentsExplorer({
@@ -38,7 +40,7 @@ export function AgentsExplorer({
     (value: string) => {
       setLoading(true);
 
-      const params = new URLSearchParams({ limit: "50" });
+      const params = new URLSearchParams({ limit: "50", actor: "ai" });
       if (value !== "all") params.set("source", value);
 
       fetch(`/api/v1/agents?${params}`)

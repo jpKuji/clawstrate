@@ -19,6 +19,19 @@ vi.mock("@/lib/redis", () => ({
 import { GET as listAgents } from "@/app/api/v1/agents/route";
 import { GET as getAgent } from "@/app/api/v1/agents/[id]/route";
 
+function chainableSelect(resolveData: any[]) {
+  const chain: any = new Proxy(
+    {},
+    {
+      get(_, prop) {
+        if (prop === "then") return (resolve: any) => resolve(resolveData);
+        return () => chain;
+      },
+    }
+  );
+  return chain;
+}
+
 function makeListRequest(params?: Record<string, string>): NextRequest {
   const url = new URL("http://localhost/api/v1/agents");
   if (params) {
@@ -41,6 +54,17 @@ describe("GET /api/v1/agents", () => {
 
   it("returns list of agents with default sort (influence desc)", async () => {
     mockDb.query.agents.findMany.mockResolvedValueOnce([mockDbAgent]);
+    mockDb.select.mockImplementationOnce(() =>
+      chainableSelect([
+        {
+          agentId: mockDbAgent.id,
+          platformId: "moltbook",
+          platformUserId: "SecurityBot",
+          platformUsername: "SecurityBot",
+          rawProfile: { actorKind: "ai" },
+        },
+      ])
+    );
 
     const res = await listAgents(makeListRequest());
     const body = await res.json();
@@ -48,6 +72,16 @@ describe("GET /api/v1/agents", () => {
     expect(res.status).toBe(200);
     expect(Array.isArray(body)).toBe(true);
     expect(body).toHaveLength(1);
+    expect(body[0].actorKind).toBe("ai");
+    expect(body[0].sourceProfileType).toBe("forum_ai");
+    expect(mockDb.query.agents.findMany).toHaveBeenCalledOnce();
+  });
+
+  it("supports actor=all for debug/admin views", async () => {
+    mockDb.query.agents.findMany.mockResolvedValueOnce([]);
+
+    const res = await listAgents(makeListRequest({ actor: "all" }));
+    expect(res.status).toBe(200);
     expect(mockDb.query.agents.findMany).toHaveBeenCalledOnce();
   });
 
@@ -141,27 +175,52 @@ describe("GET /api/v1/agents/[id]", () => {
     mockDb = createMockDb();
   });
 
-  it("returns agent detail with identities, recent actions, and profile history", async () => {
-    const agentWithIdentities = { ...mockDbAgent, identities: [mockDbIdentity] };
+  it("returns marketplace profile for RentAHuman AI agents", async () => {
+    const agentWithIdentities = {
+      ...mockDbAgent,
+      identities: [
+        {
+          ...mockDbIdentity,
+          platformId: "rentahuman",
+          platformUserId: "user_123456",
+          rawProfile: { actorKind: "ai" },
+        },
+      ],
+    };
     mockDb.query.agents.findFirst.mockResolvedValueOnce(agentWithIdentities);
-
-    const recentActions = [{ ...mockDbAction, enrichment: null }];
-    mockDb.query.actions.findMany.mockResolvedValueOnce(recentActions);
-
-    const profileHistory = [
-      { id: "profile-1", agentId: mockDbAgent.id, snapshotAt: new Date() },
-    ];
-    mockDb.query.agentProfiles.findMany.mockResolvedValueOnce(profileHistory);
+    mockDb.execute
+      .mockResolvedValueOnce({
+        rows: [
+          {
+            bounties_posted: 4,
+            total_applications_received: 19,
+            posts_30d: 3,
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        rows: [{ unique_contributors: 6, bounties_with_assignments: 2 }],
+      })
+      .mockResolvedValueOnce({
+        rows: [{ median_price: 125 }],
+      })
+      .mockResolvedValueOnce({
+        rows: [{ category: "Research", count: 2 }],
+      });
+    mockDb.query.actions.findMany.mockResolvedValueOnce([
+      { ...mockDbAction, rawData: { category: "Research", price: 100 } },
+    ]);
 
     const req = makeDetailRequest(mockDbAgent.id);
     const res = await getAgent(req, { params: Promise.resolve({ id: mockDbAgent.id }) });
     const body = await res.json();
 
     expect(res.status).toBe(200);
+    expect(body.profileVariant).toBe("marketplace_ai");
     expect(body.agent.id).toBe(mockDbAgent.id);
-    expect(body.agent.identities).toHaveLength(1);
+    expect(body.marketplaceMetrics.bountiesPosted).toBe(4);
+    expect(body.marketplaceMetrics.uniqueContributors).toBe(6);
     expect(body.recentActions).toHaveLength(1);
-    expect(body.profileHistory).toHaveLength(1);
   });
 
   it("returns 404 when agent id is not found", async () => {
@@ -169,6 +228,21 @@ describe("GET /api/v1/agents/[id]", () => {
 
     const req = makeDetailRequest("nonexistent-id");
     const res = await getAgent(req, { params: Promise.resolve({ id: "nonexistent-id" }) });
+    const body = await res.json();
+
+    expect(res.status).toBe(404);
+    expect(body.error).toBe("Not found");
+  });
+
+  it("returns 404 for human-only identities on AI pages", async () => {
+    const humanIdentityAgent = {
+      ...mockDbAgent,
+      identities: [{ ...mockDbIdentity, rawProfile: { actorKind: "human" } }],
+    };
+    mockDb.query.agents.findFirst.mockResolvedValueOnce(humanIdentityAgent);
+
+    const req = makeDetailRequest(mockDbAgent.id);
+    const res = await getAgent(req, { params: Promise.resolve({ id: mockDbAgent.id }) });
     const body = await res.json();
 
     expect(res.status).toBe(404);

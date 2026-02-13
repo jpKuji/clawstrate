@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 async function getAgents(source: string) {
   try {
     const baseUrl = getSiteBaseUrl();
-    const params = new URLSearchParams({ limit: "50" });
+    const params = new URLSearchParams({ limit: "50", actor: "ai" });
     if (source !== "all") params.set("source", source);
     const res = await fetch(`${baseUrl}/api/v1/agents?${params}`, {
       next: { revalidate: 60 },

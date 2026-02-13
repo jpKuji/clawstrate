@@ -344,14 +344,59 @@ describe("runIngestion", () => {
       .mockResolvedValueOnce([]);
     mockClient.getComments.mockResolvedValue([]);
 
-    // Post already exists
-    mockDb.query.actions.findFirst.mockResolvedValue(mockDbAction);
+    // Post already exists in batch lookup
+    mockDb.query.actions.findMany.mockResolvedValue([
+      {
+        ...mockDbAction,
+        platformId: "moltbook",
+        platformActionId: `post_${mockPost.id}`,
+      },
+    ]);
 
     const result = await runIngestion();
 
     // Should update existing action metrics
     expect(mockDb.update).toHaveBeenCalled();
     expect(result.postsIngested).toBe(0);
+  });
+
+  it("repairs identity classification even when action already exists", async () => {
+    mockRentahumanClient.listBounties.mockResolvedValueOnce({
+      success: true,
+      bounties: [
+        {
+          id: "bounty-001",
+          agentId: "agent_001",
+          agentName: "User",
+          title: "Need research help",
+          description: "Research task",
+          category: "Research",
+          upvoteCount: 1,
+          downvoteCount: 0,
+          applicationCount: 0,
+          createdAt: new Date().toISOString(),
+          assignedHumanIds: [],
+        },
+      ],
+      hasMore: false,
+      nextCursor: undefined,
+    });
+    mockDb.query.actions.findFirst.mockResolvedValue({
+      ...mockDbAction,
+      platformId: "rentahuman",
+      platformActionId: "bounty_bounty-001",
+    });
+    mockDb.query.agentIdentities.findFirst.mockResolvedValue({
+      ...mockDbIdentity,
+      platformId: "rentahuman",
+      platformUserId: "agent_001",
+      rawProfile: null,
+    });
+
+    await runIngestion();
+
+    expect(mockDb.query.agentIdentities.findFirst).toHaveBeenCalled();
+    expect(mockDb.execute).toHaveBeenCalled();
   });
 });
 

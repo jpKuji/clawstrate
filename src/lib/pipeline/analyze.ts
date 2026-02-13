@@ -13,6 +13,137 @@ import {
 import { eq, desc, gte, lte, sql, count, avg, and, inArray } from "drizzle-orm";
 import { subHours, subDays } from "date-fns";
 
+export interface MarketplaceCategorySpread {
+  category: string;
+  count: number;
+  share: number;
+}
+
+export interface MarketplaceMetrics {
+  bountiesPosted: number;
+  totalApplicationsReceived: number;
+  uniqueContributors: number;
+  assignmentRate: number;
+  medianBountyPrice: number | null;
+  categorySpread: MarketplaceCategorySpread[];
+  recentPostingCadence: number;
+}
+
+function extractRows<T>(result: unknown): T[] {
+  if (Array.isArray(result)) return result as T[];
+  if (result && typeof result === "object" && "rows" in (result as Record<string, unknown>)) {
+    const rows = (result as { rows?: unknown }).rows;
+    return Array.isArray(rows) ? (rows as T[]) : [];
+  }
+  return [];
+}
+
+export async function computeMarketplaceAgentMetrics(
+  agentId: string
+): Promise<MarketplaceMetrics> {
+  const [summaryResult, assignmentResult, medianPriceResult, categoryResult] =
+    await Promise.all([
+      db.execute<{
+        bounties_posted: number;
+        total_applications_received: number;
+        posts_30d: number;
+      }>(sql`
+        SELECT
+          COUNT(*) FILTER (WHERE action_type = 'post')::int AS bounties_posted,
+          COALESCE(SUM(reply_count) FILTER (WHERE action_type = 'post'), 0)::int AS total_applications_received,
+          COUNT(*) FILTER (WHERE action_type = 'post' AND performed_at >= NOW() - INTERVAL '30 days')::int AS posts_30d
+        FROM actions
+        WHERE platform_id = 'rentahuman' AND agent_id = ${agentId}
+      `),
+      db.execute<{
+        unique_contributors: number;
+        bounties_with_assignments: number;
+      }>(sql`
+        SELECT
+          COUNT(DISTINCT c.agent_id)::int AS unique_contributors,
+          COUNT(DISTINCT p.id) FILTER (WHERE c.id IS NOT NULL)::int AS bounties_with_assignments
+        FROM actions p
+        LEFT JOIN actions c
+          ON c.parent_action_id = p.id
+         AND c.platform_id = 'rentahuman'
+         AND COALESCE(c.raw_data->>'kind', '') = 'assignment'
+        WHERE p.platform_id = 'rentahuman'
+          AND p.action_type = 'post'
+          AND p.agent_id = ${agentId}
+      `),
+      db.execute<{ median_price: string | number | null }>(sql`
+        SELECT
+          percentile_cont(0.5) WITHIN GROUP (ORDER BY (raw_data->>'price')::numeric) AS median_price
+        FROM actions
+        WHERE platform_id = 'rentahuman'
+          AND action_type = 'post'
+          AND agent_id = ${agentId}
+          AND raw_data->>'price' IS NOT NULL
+          AND (raw_data->>'price') ~ '^[0-9]+(\\.[0-9]+)?$'
+      `),
+      db.execute<{ category: string | null; count: number }>(sql`
+        SELECT
+          COALESCE(raw_data->>'category', 'Uncategorized') AS category,
+          COUNT(*)::int AS count
+        FROM actions
+        WHERE platform_id = 'rentahuman'
+          AND action_type = 'post'
+          AND agent_id = ${agentId}
+        GROUP BY 1
+        ORDER BY 2 DESC
+        LIMIT 8
+      `),
+    ]);
+
+  const summary = extractRows<{
+    bounties_posted: number;
+    total_applications_received: number;
+    posts_30d: number;
+  }>(summaryResult)[0];
+  const assignments = extractRows<{
+    unique_contributors: number;
+    bounties_with_assignments: number;
+  }>(assignmentResult)[0];
+  const medianPrice = extractRows<{ median_price: string | number | null }>(
+    medianPriceResult
+  )[0];
+  const categoryRows = extractRows<{ category: string | null; count: number }>(
+    categoryResult
+  );
+
+  const bountiesPosted = Number(summary?.bounties_posted) || 0;
+  const totalApplicationsReceived =
+    Number(summary?.total_applications_received) || 0;
+  const uniqueContributors = Number(assignments?.unique_contributors) || 0;
+  const bountiesWithAssignments =
+    Number(assignments?.bounties_with_assignments) || 0;
+  const assignmentRate =
+    bountiesPosted > 0 ? bountiesWithAssignments / bountiesPosted : 0;
+  const medianBountyPrice =
+    medianPrice?.median_price == null
+      ? null
+      : Number(medianPrice.median_price);
+  const posts30d = Number(summary?.posts_30d) || 0;
+  const recentPostingCadence = Number(((posts30d * 7) / 30).toFixed(2));
+
+  return {
+    bountiesPosted,
+    totalApplicationsReceived,
+    uniqueContributors,
+    assignmentRate,
+    medianBountyPrice,
+    categorySpread: categoryRows.map((row) => ({
+      category: row.category || "Uncategorized",
+      count: Number(row.count) || 0,
+      share:
+        bountiesPosted > 0
+          ? Number((Number(row.count || 0) / bountiesPosted).toFixed(4))
+          : 0,
+    })),
+    recentPostingCadence,
+  };
+}
+
 /**
  * Compute behavioral analysis. Call every 4 hours.
  */

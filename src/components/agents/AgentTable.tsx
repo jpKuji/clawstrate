@@ -15,6 +15,7 @@ import type { SourceDisplayConfig } from "@/lib/sources/display";
 interface Agent {
   id: string;
   displayName: string;
+  displayLabel?: string;
   influenceScore: number | null;
   autonomyScore: number | null;
   activityScore: number | null;
@@ -23,6 +24,7 @@ interface Agent {
   lastSeenAt: string;
   platformIds?: string[];
   actorKind?: string;
+  sourceProfileType?: "forum_ai" | "marketplace_ai";
 }
 
 const typeColors: Record<string, string> = {
@@ -62,9 +64,17 @@ export function AgentTable({
                   href={`/agents/${agent.id}`}
                   className="text-zinc-100 hover:text-white font-medium"
                 >
-                  {agent.displayName}
+                  {agent.displayLabel || agent.displayName}
                 </Link>
                 {agent.actorKind === "human" && <ActorKindBadge kind="human" />}
+                {agent.sourceProfileType === "marketplace_ai" && (
+                  <Badge
+                    variant="outline"
+                    className="border-zinc-700 text-zinc-500 text-[10px]"
+                  >
+                    marketplace
+                  </Badge>
+                )}
               </div>
             </TableCell>
             <TableCell>
