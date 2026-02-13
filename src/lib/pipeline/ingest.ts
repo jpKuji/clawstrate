@@ -7,9 +7,14 @@ import {
   interactions,
   syncLog,
 } from "../db/schema";
-import { eq, and, sql } from "drizzle-orm";
+import { eq, and, sql, inArray } from "drizzle-orm";
 import { getEnabledSourceAdapters } from "../sources";
 import { NormalizedAction } from "../sources/types";
+import {
+  classifyRentAHumanActor,
+  formatAgentDisplayLabel,
+  mergeActorKindIntoRawProfile,
+} from "../agents/classify";
 
 /**
  * Main ingestion function. Call every 30 minutes.
@@ -57,9 +62,27 @@ export async function runIngestion(): Promise<{
         `[ingest:${adapter.id}] Total normalized actions: ${ingestResult.actions.length}`
       );
 
+      // Batch-check which actions already exist (1 query instead of N)
+      const platformActionIds = ingestResult.actions.map(
+        (a) => a.platformActionId
+      );
+      const existingActionsList =
+        platformActionIds.length > 0
+          ? await db.query.actions.findMany({
+              where: and(
+                eq(actions.platformId, adapter.platformId),
+                inArray(actions.platformActionId, platformActionIds)
+              ),
+            })
+          : [];
+      const existingActionMap = new Map(
+        existingActionsList.map((a) => [a.platformActionId, a])
+      );
+
       for (const action of ingestResult.actions) {
         try {
-          const result = await upsertAction(action);
+          const existing = existingActionMap.get(action.platformActionId);
+          const result = await upsertAction(action, existing ?? undefined);
           if (result.isNew) {
             if (action.actionType === "post") {
               postsIngested++;
@@ -108,18 +131,11 @@ export async function runIngestion(): Promise<{
  * Handles agent/community creation and interaction edge creation.
  */
 async function upsertAction(
-  action: NormalizedAction
+  action: NormalizedAction,
+  existingAction?: { id: string }
 ): Promise<{ isNew: boolean }> {
-  // Check if action already exists
-  const existing = await db.query.actions.findFirst({
-    where: and(
-      eq(actions.platformId, action.platformId),
-      eq(actions.platformActionId, action.platformActionId)
-    ),
-  });
-
-  if (existing) {
-    // Update metrics (upvotes etc may have changed)
+  if (existingAction) {
+    // Fast path: action already exists, just update metrics (skip agent upsert)
     await db
       .update(actions)
       .set({
@@ -127,7 +143,7 @@ async function upsertAction(
         downvotes: action.downvotes,
         replyCount: action.replyCount,
       })
-      .where(eq(actions.id, existing.id));
+      .where(eq(actions.id, existingAction.id));
     return { isNew: false };
   }
 
@@ -209,6 +225,12 @@ async function upsertAction(
 }
 
 async function upsertAgent(action: NormalizedAction): Promise<string> {
+  const displayLabel = formatAgentDisplayLabel({
+    displayName: action.authorDisplayName,
+    platformId: action.platformId,
+    platformUserId: action.authorPlatformUserId,
+  });
+
   // Check if we have this identity
   const existingIdentity = await db.query.agentIdentities.findFirst({
     where: and(
@@ -218,40 +240,51 @@ async function upsertAgent(action: NormalizedAction): Promise<string> {
   });
 
   if (existingIdentity) {
-    // Update karma if provided
+    const rawProfilePatch = await buildRawProfilePatch(action, existingIdentity.agentId);
+    const platformUsername =
+      action.platformId === "rentahuman"
+        ? displayLabel
+        : action.authorDisplayName;
+    const identityPatch: Record<string, unknown> = {
+      lastSyncedAt: new Date(),
+      platformUsername,
+    };
+
     if (action.authorKarma !== null) {
-      await db
-        .update(agentIdentities)
-        .set({
-          platformKarma: action.authorKarma,
-          lastSyncedAt: new Date(),
-        })
-        .where(eq(agentIdentities.id, existingIdentity.id));
+      identityPatch.platformKarma = action.authorKarma;
     }
-    // Merge author profile (or actorKind) into rawProfile
-    if (action.authorRawProfile) {
-      await db
-        .update(agentIdentities)
-        .set({
-          rawProfile: sql`COALESCE(${agentIdentities.rawProfile}, '{}'::jsonb) || ${JSON.stringify(action.authorRawProfile)}::jsonb`,
-        })
-        .where(eq(agentIdentities.id, existingIdentity.id));
-    } else if (action.actorKind) {
-      await db
-        .update(agentIdentities)
-        .set({
-          rawProfile: sql`COALESCE(${agentIdentities.rawProfile}, '{}'::jsonb) || ${JSON.stringify({ actorKind: action.actorKind })}::jsonb`,
-        })
-        .where(eq(agentIdentities.id, existingIdentity.id));
+
+    if (rawProfilePatch) {
+      identityPatch.rawProfile = sql`COALESCE(${agentIdentities.rawProfile}, '{}'::jsonb) || ${JSON.stringify(rawProfilePatch)}::jsonb`;
     }
+
+    await db
+      .update(agentIdentities)
+      .set(identityPatch as any)
+      .where(eq(agentIdentities.id, existingIdentity.id));
+
+    const agentPatch: Record<string, unknown> = {
+      displayName: displayLabel,
+    };
+    if (action.authorDescription) {
+      agentPatch.description = action.authorDescription;
+    }
+
+    await db
+      .update(agents)
+      .set(agentPatch as any)
+      .where(eq(agents.id, existingIdentity.agentId));
+
     return existingIdentity.agentId;
   }
+
+  const rawProfilePatch = await buildRawProfilePatch(action);
 
   // Create new agent + identity
   const [newAgent] = await db
     .insert(agents)
     .values({
-      displayName: action.authorDisplayName,
+      displayName: displayLabel,
       description: action.authorDescription,
       firstSeenAt: action.performedAt,
       lastSeenAt: action.performedAt,
@@ -263,13 +296,104 @@ async function upsertAgent(action: NormalizedAction): Promise<string> {
     agentId: newAgent.id,
     platformId: action.platformId,
     platformUserId: action.authorPlatformUserId,
-    platformUsername: action.authorDisplayName,
+    platformUsername:
+      action.platformId === "rentahuman"
+        ? displayLabel
+        : action.authorDisplayName,
     platformKarma: action.authorKarma,
-    rawProfile: action.authorRawProfile
-      ?? (action.actorKind ? { actorKind: action.actorKind } : null),
+    rawProfile: rawProfilePatch,
   });
 
   return newAgent.id;
+}
+
+function extractRows<T>(result: unknown): T[] {
+  if (Array.isArray(result)) return result as T[];
+  if (result && typeof result === "object" && "rows" in (result as Record<string, unknown>)) {
+    const rows = (result as { rows?: unknown }).rows;
+    return Array.isArray(rows) ? (rows as T[]) : [];
+  }
+  return [];
+}
+
+function rentAHumanActionFlags(action: NormalizedAction): {
+  bountyPosts: number;
+  assignmentComments: number;
+} {
+  const rawKind =
+    action.rawData && typeof action.rawData.kind === "string"
+      ? action.rawData.kind
+      : null;
+
+  const isBounty = action.actionType === "post" || rawKind === "bounty";
+  const isAssignment = rawKind === "assignment" || action.actionType !== "post";
+
+  return {
+    bountyPosts: isBounty ? 1 : 0,
+    assignmentComments: isAssignment ? 1 : 0,
+  };
+}
+
+async function resolveRentAHumanClassification(
+  action: NormalizedAction,
+  existingAgentId?: string
+) {
+  const currentFlags = rentAHumanActionFlags(action);
+
+  if (!existingAgentId) {
+    return classifyRentAHumanActor(currentFlags);
+  }
+
+  const countsResult = await db.execute<{
+    bounty_posts: number;
+    assignment_comments: number;
+  }>(sql`
+    SELECT
+      COUNT(*) FILTER (
+        WHERE ${actions.actionType} = 'post'
+          AND COALESCE(${actions.rawData}->>'kind', 'bounty') = 'bounty'
+      )::int AS bounty_posts,
+      COUNT(*) FILTER (
+        WHERE COALESCE(${actions.rawData}->>'kind', '') = 'assignment'
+      )::int AS assignment_comments
+    FROM ${actions}
+    WHERE ${actions.agentId} = ${existingAgentId}
+      AND ${actions.platformId} = 'rentahuman'
+  `);
+
+  const rows = extractRows<{ bounty_posts: number; assignment_comments: number }>(
+    countsResult
+  );
+  const row = rows[0];
+
+  return classifyRentAHumanActor({
+    bountyPosts: Number(row?.bounty_posts || 0) + currentFlags.bountyPosts,
+    assignmentComments:
+      Number(row?.assignment_comments || 0) + currentFlags.assignmentComments,
+  });
+}
+
+async function buildRawProfilePatch(
+  action: NormalizedAction,
+  existingAgentId?: string
+): Promise<Record<string, unknown> | null> {
+  const patch: Record<string, unknown> = {
+    ...(action.authorRawProfile || {}),
+  };
+
+  if (action.platformId === "rentahuman") {
+    const classification = await resolveRentAHumanClassification(
+      action,
+      existingAgentId
+    );
+    return mergeActorKindIntoRawProfile(patch, classification);
+  }
+
+  if (action.actorKind) {
+    patch.actorKind = action.actorKind;
+  }
+
+  return Object.keys(patch).length > 0 ? patch : null;
 }
 
 async function upsertCommunity(action: NormalizedAction): Promise<string> {
