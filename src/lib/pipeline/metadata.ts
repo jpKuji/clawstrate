@@ -27,6 +27,10 @@ export const PIPELINE_RUNTIME_CADENCE = {
   weeklyExecutiveRoute: "/api/cron/briefing-weekly",
   weeklyExecutiveBehavior:
     "Weekly executive briefing generation runs separately from the core orchestration pipeline.",
+  onchainCron: "*/10 * * * *",
+  onchainRoute: "/api/cron/onchain",
+  onchainBackfillCron: "5 * * * *",
+  onchainBackfillRoute: "/api/cron/onchain-backfill",
 } as const;
 
 export const PIPELINE_LOOKBACK_WINDOWS = [

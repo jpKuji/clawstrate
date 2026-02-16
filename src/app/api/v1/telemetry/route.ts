@@ -9,6 +9,8 @@ const telemetrySchema = z.object({
     "alert_interaction",
     "watchlist_add",
     "watchlist_remove",
+    "onchain_api_call",
+    "onchain_export",
   ]),
   narrativeId: z.string().uuid().optional(),
   agentId: z.string().uuid().optional(),

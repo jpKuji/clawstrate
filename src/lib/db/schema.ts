@@ -572,6 +572,8 @@ export const accounts = pgTable("accounts", {
   tier: text("tier").notNull().default("free"),
   monthlyBriefingViewQuota: integer("monthly_briefing_view_quota").default(1000),
   monthlyAlertInteractionQuota: integer("monthly_alert_interaction_quota").default(2000),
+  monthlyOnchainApiCallQuota: integer("monthly_onchain_api_call_quota").default(5000),
+  monthlyOnchainExportQuota: integer("monthly_onchain_export_quota").default(100),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
@@ -605,11 +607,347 @@ export const accountUsageDaily = pgTable(
     briefingViews: integer("briefing_views").default(0),
     alertInteractions: integer("alert_interactions").default(0),
     watchlistInteractions: integer("watchlist_interactions").default(0),
+    onchainApiCalls: integer("onchain_api_calls").default(0),
+    onchainExports: integer("onchain_exports").default(0),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
   },
   (t) => [
     uniqueIndex("idx_account_usage_daily_unique").on(t.accountId, t.date),
     index("idx_account_usage_daily_date").on(t.date),
+  ]
+);
+
+// ============================================================
+// ONCHAIN TABLES (ERC-8004 + Related Standards)
+// ============================================================
+
+export const onchainChains = pgTable(
+  "onchain_chains",
+  {
+    chainId: integer("chain_id").primaryKey(),
+    name: text("name").notNull(),
+    isTestnet: boolean("is_testnet").notNull().default(false),
+    enabled: boolean("enabled").notNull().default(true),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (t) => [index("idx_onchain_chains_enabled").on(t.enabled)]
+);
+
+export const onchainContracts = pgTable(
+  "onchain_contracts",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    chainId: integer("chain_id")
+      .references(() => onchainChains.chainId)
+      .notNull(),
+    standard: text("standard").notNull(), // erc8004, erc6551, erc4337, erc8001, erc7007, erc7579, eip7702
+    role: text("role").notNull(), // identity_registry, reputation_registry, etc.
+    address: text("address").notNull(),
+    startBlock: integer("start_block").notNull().default(0),
+    abiVersion: text("abi_version"),
+    enabled: boolean("enabled").notNull().default(true),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (t) => [
+    uniqueIndex("idx_onchain_contract_unique").on(t.chainId, t.address, t.role),
+    index("idx_onchain_contract_standard").on(t.standard),
+  ]
+);
+
+export const onchainEventLogs = pgTable(
+  "onchain_event_logs",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    chainId: integer("chain_id")
+      .references(() => onchainChains.chainId)
+      .notNull(),
+    standard: text("standard").notNull(),
+    contractAddress: text("contract_address").notNull(),
+    blockNumber: integer("block_number").notNull(),
+    blockTime: timestamp("block_time").notNull(),
+    txHash: text("tx_hash").notNull(),
+    logIndex: integer("log_index").notNull(),
+    eventName: text("event_name").notNull(),
+    eventSig: text("event_sig"),
+    decodedJson: jsonb("decoded_json").$type<Record<string, unknown>>(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (t) => [
+    uniqueIndex("idx_onchain_log_unique").on(t.chainId, t.txHash, t.logIndex),
+    index("idx_onchain_log_block").on(t.chainId, t.blockNumber),
+    index("idx_onchain_log_event").on(t.eventName),
+    index("idx_onchain_log_standard").on(t.standard),
+  ]
+);
+
+export const erc8004Agents = pgTable(
+  "erc8004_agents",
+  {
+    agentKey: text("agent_key").primaryKey(), // chainId:registryAddress:agentId
+    chainId: integer("chain_id")
+      .references(() => onchainChains.chainId)
+      .notNull(),
+    registryAddress: text("registry_address").notNull(),
+    agentId: text("agent_id").notNull(),
+    ownerAddress: text("owner_address"),
+    agentUri: text("agent_uri"),
+    agentWallet: text("agent_wallet"),
+    isActive: boolean("is_active").notNull().default(true),
+    registeredTxHash: text("registered_tx_hash"),
+    updatedTxHash: text("updated_tx_hash"),
+    lastEventBlock: integer("last_event_block"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (t) => [
+    index("idx_erc8004_agents_chain_registry").on(t.chainId, t.registryAddress),
+    index("idx_erc8004_agents_owner").on(t.ownerAddress),
+    index("idx_erc8004_agents_updated").on(t.updatedAt),
+  ]
+);
+
+export const erc8004AgentMetadata = pgTable(
+  "erc8004_agent_metadata",
+  {
+    agentKey: text("agent_key")
+      .references(() => erc8004Agents.agentKey)
+      .primaryKey(),
+    name: text("name"),
+    description: text("description"),
+    protocols: jsonb("protocols").$type<string[]>(),
+    x402Supported: boolean("x402_supported"),
+    serviceEndpointsJson: jsonb("service_endpoints_json").$type<Record<string, unknown>>(),
+    crossChainJson: jsonb("cross_chain_json").$type<Record<string, unknown>[]>(),
+    parseStatus: text("parse_status"), // success, partial, error
+    fieldSources: jsonb("field_sources").$type<Record<string, unknown>>(),
+    lastParsedAt: timestamp("last_parsed_at"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (t) => [index("idx_erc8004_agent_metadata_parse_status").on(t.parseStatus)]
+);
+
+export const erc8004Feedbacks = pgTable(
+  "erc8004_feedbacks",
+  {
+    feedbackKey: text("feedback_key").primaryKey(), // agentKey:clientAddress:feedbackIndex
+    agentKey: text("agent_key")
+      .references(() => erc8004Agents.agentKey)
+      .notNull(),
+    clientAddress: text("client_address").notNull(),
+    feedbackIndex: integer("feedback_index").notNull(),
+    valueNumeric: text("value_numeric"), // int128 serialized as text
+    valueDecimals: integer("value_decimals"),
+    tag1: text("tag1"),
+    tag2: text("tag2"),
+    endpoint: text("endpoint"),
+    feedbackUri: text("feedback_uri"),
+    feedbackHash: text("feedback_hash"),
+    isRevoked: boolean("is_revoked").notNull().default(false),
+    createdTxHash: text("created_tx_hash"),
+    revokedTxHash: text("revoked_tx_hash"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (t) => [
+    index("idx_erc8004_feedback_agent").on(t.agentKey),
+    index("idx_erc8004_feedback_client").on(t.clientAddress),
+  ]
+);
+
+export const erc8004FeedbackResponses = pgTable(
+  "erc8004_feedback_responses",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    feedbackKey: text("feedback_key")
+      .references(() => erc8004Feedbacks.feedbackKey)
+      .notNull(),
+    responder: text("responder").notNull(),
+    responseUri: text("response_uri"),
+    responseHash: text("response_hash"),
+    txHash: text("tx_hash").notNull(),
+    logIndex: integer("log_index").notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (t) => [uniqueIndex("idx_erc8004_feedback_response_unique").on(t.txHash, t.logIndex)]
+);
+
+export const erc8004Validations = pgTable(
+  "erc8004_validations",
+  {
+    requestHash: text("request_hash").primaryKey(),
+    agentKey: text("agent_key").references(() => erc8004Agents.agentKey),
+    validatorAddress: text("validator_address"),
+    requestUri: text("request_uri"),
+    responseScore: integer("response_score"),
+    responseUri: text("response_uri"),
+    responseHash: text("response_hash"),
+    tag: text("tag"),
+    status: text("status").notNull().default("requested"), // requested, responded
+    requestedTxHash: text("requested_tx_hash"),
+    respondedTxHash: text("responded_tx_hash"),
+    lastUpdatedBlock: integer("last_updated_block"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (t) => [
+    index("idx_erc8004_validations_agent").on(t.agentKey),
+    index("idx_erc8004_validations_validator").on(t.validatorAddress),
+  ]
+);
+
+export const erc6551Accounts = pgTable(
+  "erc6551_accounts",
+  {
+    accountKey: text("account_key").primaryKey(),
+    chainId: integer("chain_id")
+      .references(() => onchainChains.chainId)
+      .notNull(),
+    registryAddress: text("registry_address").notNull(),
+    accountAddress: text("account_address").notNull(),
+    tokenContract: text("token_contract").notNull(),
+    tokenId: text("token_id").notNull(),
+    salt: text("salt"),
+    implementation: text("implementation"),
+    createdTxHash: text("created_tx_hash"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (t) => [
+    uniqueIndex("idx_erc6551_account_address_unique").on(t.chainId, t.accountAddress),
+    index("idx_erc6551_token_ref").on(t.chainId, t.tokenContract, t.tokenId),
+  ]
+);
+
+export const erc4337UserOps = pgTable(
+  "erc4337_userops",
+  {
+    userOpHash: text("userop_hash").primaryKey(),
+    chainId: integer("chain_id")
+      .references(() => onchainChains.chainId)
+      .notNull(),
+    entryPoint: text("entry_point"),
+    sender: text("sender"),
+    paymaster: text("paymaster"),
+    nonce: text("nonce"),
+    success: boolean("success"),
+    actualGasCost: text("actual_gas_cost"),
+    actualGasUsed: text("actual_gas_used"),
+    txHash: text("tx_hash"),
+    blockNumber: integer("block_number"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (t) => [
+    index("idx_erc4337_sender").on(t.sender),
+    index("idx_erc4337_block").on(t.chainId, t.blockNumber),
+  ]
+);
+
+export const erc8001Coordinations = pgTable(
+  "erc8001_coordinations",
+  {
+    intentHash: text("intent_hash").primaryKey(),
+    chainId: integer("chain_id")
+      .references(() => onchainChains.chainId)
+      .notNull(),
+    contractAddress: text("contract_address").notNull(),
+    coordinationType: text("coordination_type"),
+    proposer: text("proposer"),
+    executor: text("executor"),
+    status: text("status").notNull().default("proposed"), // proposed, accepted, executed, cancelled
+    participantCount: integer("participant_count"),
+    acceptedCount: integer("accepted_count"),
+    coordinationValue: text("coordination_value"),
+    lastTxHash: text("last_tx_hash"),
+    lastBlock: integer("last_block"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (t) => [
+    index("idx_erc8001_chain_contract").on(t.chainId, t.contractAddress),
+    index("idx_erc8001_status").on(t.status),
+  ]
+);
+
+export const erc7007AigcEvents = pgTable(
+  "erc7007_aigc_events",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    chainId: integer("chain_id")
+      .references(() => onchainChains.chainId)
+      .notNull(),
+    contractAddress: text("contract_address").notNull(),
+    tokenId: text("token_id").notNull(),
+    promptBytes: text("prompt_bytes"),
+    aigcDataBytes: text("aigc_data_bytes"),
+    proofBytes: text("proof_bytes"),
+    txHash: text("tx_hash").notNull(),
+    logIndex: integer("log_index").notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (t) => [
+    uniqueIndex("idx_erc7007_event_unique").on(t.chainId, t.txHash, t.logIndex),
+    index("idx_erc7007_contract").on(t.chainId, t.contractAddress),
+  ]
+);
+
+export const erc7579ModuleEvents = pgTable(
+  "erc7579_module_events",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    chainId: integer("chain_id")
+      .references(() => onchainChains.chainId)
+      .notNull(),
+    accountAddress: text("account_address").notNull(),
+    moduleTypeId: text("module_type_id"),
+    moduleAddress: text("module_address"),
+    eventType: text("event_type").notNull(), // installed, uninstalled
+    txHash: text("tx_hash").notNull(),
+    logIndex: integer("log_index").notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (t) => [
+    uniqueIndex("idx_erc7579_event_unique").on(t.chainId, t.txHash, t.logIndex),
+    index("idx_erc7579_account").on(t.chainId, t.accountAddress),
+  ]
+);
+
+export const eip7702Authorizations = pgTable(
+  "eip7702_authorizations",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    chainId: integer("chain_id")
+      .references(() => onchainChains.chainId)
+      .notNull(),
+    txHash: text("tx_hash").notNull(),
+    blockNumber: integer("block_number").notNull(),
+    senderEoa: text("sender_eoa").notNull(),
+    authorizationCount: integer("authorization_count").notNull().default(0),
+    authorizationJson: jsonb("authorization_json").$type<Record<string, unknown>[]>(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (t) => [
+    uniqueIndex("idx_eip7702_tx_unique").on(t.chainId, t.txHash),
+    index("idx_eip7702_sender").on(t.chainId, t.senderEoa),
+  ]
+);
+
+export const onchainExports = pgTable(
+  "onchain_exports",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    accountId: text("account_id").references(() => accounts.id),
+    format: text("format").notNull(), // csv, json
+    status: text("status").notNull().default("completed"),
+    filters: jsonb("filters").$type<Record<string, unknown>>(),
+    fileContent: text("file_content"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (t) => [
+    index("idx_onchain_exports_account").on(t.accountId),
+    index("idx_onchain_exports_created").on(t.createdAt),
   ]
 );
 

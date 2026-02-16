@@ -1,6 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { actions, agents, topics, enrichments, actionTopics, agentIdentities } from "@/lib/db/schema";
+import {
+  actions,
+  agents,
+  topics,
+  enrichments,
+  actionTopics,
+  agentIdentities,
+  onchainEventLogs,
+  erc8004Agents,
+} from "@/lib/db/schema";
 import { count, avg, gte, and, lt, eq, sql, inArray, desc } from "drizzle-orm";
 import { subHours } from "date-fns";
 import { cacheGet, cacheSet } from "@/lib/redis";
@@ -291,6 +300,57 @@ export async function GET(req?: NextRequest) {
         },
         topOffering: offeringsMap.get(pid) || null,
       };
+    });
+
+    const [
+      onchainCurrentEvents,
+      onchainPreviousEvents,
+      onchainCurrentAgents,
+      onchainPreviousAgents,
+    ] = await Promise.all([
+      db
+        .select({ count: count(onchainEventLogs.id) })
+        .from(onchainEventLogs)
+        .where(gte(onchainEventLogs.blockTime, last24h)),
+      db
+        .select({ count: count(onchainEventLogs.id) })
+        .from(onchainEventLogs)
+        .where(
+          and(
+            gte(onchainEventLogs.blockTime, last48h),
+            lt(onchainEventLogs.blockTime, last24h)
+          )
+        ),
+      db
+        .select({ count: count(erc8004Agents.agentKey) })
+        .from(erc8004Agents)
+        .where(gte(erc8004Agents.updatedAt, last24h)),
+      db
+        .select({ count: count(erc8004Agents.agentKey) })
+        .from(erc8004Agents)
+        .where(
+          and(
+            gte(erc8004Agents.updatedAt, last48h),
+            lt(erc8004Agents.updatedAt, last24h)
+          )
+        ),
+    ]);
+
+    sourceActivity.push({
+      platformId: "onchain",
+      posts: {
+        current: Number(onchainCurrentEvents[0]?.count ?? 0),
+        change:
+          Number(onchainCurrentEvents[0]?.count ?? 0) -
+          Number(onchainPreviousEvents[0]?.count ?? 0),
+      },
+      comments: {
+        current: Number(onchainCurrentAgents[0]?.count ?? 0),
+        change:
+          Number(onchainCurrentAgents[0]?.count ?? 0) -
+          Number(onchainPreviousAgents[0]?.count ?? 0),
+      },
+      topOffering: null,
     });
   }
 

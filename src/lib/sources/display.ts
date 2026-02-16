@@ -8,7 +8,7 @@ export interface SourceDisplayConfig {
   dotColor: string;
   postLabel: string;
   commentLabel: string;
-  sourceType: "forum" | "marketplace";
+  sourceType: "forum" | "marketplace" | "onchain";
   actorKinds: ("ai" | "human")[];
   description: string;
 }
@@ -57,6 +57,19 @@ function defaultShortLabel(displayName: string): string {
   return displayName.slice(0, 2).toUpperCase();
 }
 
+const ONCHAIN_SOURCE_CONFIG: SourceDisplayConfig = {
+  id: "onchain",
+  displayName: "EVM Onchain",
+  shortLabel: "EVM",
+  color: "border-fuchsia-700 text-fuchsia-400",
+  dotColor: "bg-fuchsia-500",
+  postLabel: "Events",
+  commentLabel: "Agents",
+  sourceType: "onchain",
+  actorKinds: ["ai"],
+  description: "ERC-8004 and related EVM standards across Ethereum, Base, Arbitrum, Optimism, Polygon",
+};
+
 export function getSourceDisplayMap(): Map<string, SourceDisplayConfig> {
   const adapters = getSourceAdapters();
   const map = new Map<string, SourceDisplayConfig>();
@@ -86,6 +99,8 @@ export function getSourceDisplayMap(): Map<string, SourceDisplayConfig> {
       ...sourceTypeConfig,
     });
   });
+
+  map.set(ONCHAIN_SOURCE_CONFIG.id, ONCHAIN_SOURCE_CONFIG);
 
   return map;
 }

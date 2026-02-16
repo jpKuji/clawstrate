@@ -41,6 +41,8 @@ async function seed() {
       tier: "free",
       monthlyBriefingViewQuota: 1000,
       monthlyAlertInteractionQuota: 2000,
+      monthlyOnchainApiCallQuota: 5000,
+      monthlyOnchainExportQuota: 100,
     })
     .onConflictDoNothing();
 

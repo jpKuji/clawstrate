@@ -1,0 +1,114 @@
+{
+  "chains": [
+    {
+      "chainId": 1,
+      "name": "Ethereum Mainnet",
+      "enabled": true,
+      "rpcUrls": [
+        "https://ethereum-rpc.publicnode.com",
+        "https://rpc.ankr.com/eth"
+      ],
+      "startBlock": 24339871,
+      "contracts": {
+        "erc8004": {
+          "identityRegistry": "0x8004a169fb4a3325136eb29fa0ceb6d2e539a432",
+          "reputationRegistry": "0x8004baa17c55a88189ae136b182e5fda19de9b63",
+          "validationRegistry": "0x8004cc8439f36fd5f9f049d9ff86523df6daab58"
+        },
+        "erc6551Registry": "0x000000006551c19487814612e58fe06813775758",
+        "erc4337EntryPoint": "0x5ff137d4b0fdcd49dca30c7cf57e578a026d2789",
+        "erc8001Contracts": [],
+        "erc7007Contracts": [],
+        "erc7579Accounts": []
+      }
+    },
+    {
+      "chainId": 8453,
+      "name": "Base",
+      "enabled": true,
+      "rpcUrls": [
+        "https://base-rpc.publicnode.com",
+        "https://mainnet.base.org"
+      ],
+      "startBlock": 41663783,
+      "contracts": {
+        "erc8004": {
+          "identityRegistry": "0x8004a169fb4a3325136eb29fa0ceb6d2e539a432",
+          "reputationRegistry": "0x8004baa17c55a88189ae136b182e5fda19de9b63",
+          "validationRegistry": "0x8004cc8439f36fd5f9f049d9ff86523df6daab58"
+        },
+        "erc6551Registry": "0x000000006551c19487814612e58fe06813775758",
+        "erc4337EntryPoint": "0x5ff137d4b0fdcd49dca30c7cf57e578a026d2789",
+        "erc8001Contracts": [],
+        "erc7007Contracts": [],
+        "erc7579Accounts": []
+      }
+    },
+    {
+      "chainId": 42161,
+      "name": "Arbitrum One",
+      "enabled": true,
+      "rpcUrls": [
+        "https://arbitrum-one-rpc.publicnode.com",
+        "https://arb1.arbitrum.io/rpc"
+      ],
+      "startBlock": 428895443,
+      "contracts": {
+        "erc8004": {
+          "identityRegistry": "0x8004a169fb4a3325136eb29fa0ceb6d2e539a432",
+          "reputationRegistry": "0x8004baa17c55a88189ae136b182e5fda19de9b63",
+          "validationRegistry": "0x8004cc8439f36fd5f9f049d9ff86523df6daab58"
+        },
+        "erc6551Registry": "0x000000006551c19487814612e58fe06813775758",
+        "erc4337EntryPoint": "0x5ff137d4b0fdcd49dca30c7cf57e578a026d2789",
+        "erc8001Contracts": [],
+        "erc7007Contracts": [],
+        "erc7579Accounts": []
+      }
+    },
+    {
+      "chainId": 10,
+      "name": "Optimism",
+      "enabled": true,
+      "rpcUrls": [
+        "https://optimism-rpc.publicnode.com",
+        "https://mainnet.optimism.io"
+      ],
+      "startBlock": 147514947,
+      "contracts": {
+        "erc8004": {
+          "identityRegistry": "0x8004a169fb4a3325136eb29fa0ceb6d2e539a432",
+          "reputationRegistry": "0x8004baa17c55a88189ae136b182e5fda19de9b63",
+          "validationRegistry": "0x8004cc8439f36fd5f9f049d9ff86523df6daab58"
+        },
+        "erc6551Registry": "0x000000006551c19487814612e58fe06813775758",
+        "erc4337EntryPoint": "0x5ff137d4b0fdcd49dca30c7cf57e578a026d2789",
+        "erc8001Contracts": [],
+        "erc7007Contracts": [],
+        "erc7579Accounts": []
+      }
+    },
+    {
+      "chainId": 137,
+      "name": "Polygon",
+      "enabled": true,
+      "rpcUrls": [
+        "https://polygon-bor-rpc.publicnode.com",
+        "https://polygon-rpc.com"
+      ],
+      "startBlock": 82458484,
+      "contracts": {
+        "erc8004": {
+          "identityRegistry": "0x8004a169fb4a3325136eb29fa0ceb6d2e539a432",
+          "reputationRegistry": "0x8004baa17c55a88189ae136b182e5fda19de9b63",
+          "validationRegistry": "0x8004cc8439f36fd5f9f049d9ff86523df6daab58"
+        },
+        "erc6551Registry": "0x000000006551c19487814612e58fe06813775758",
+        "erc4337EntryPoint": "0x5ff137d4b0fdcd49dca30c7cf57e578a026d2789",
+        "erc8001Contracts": [],
+        "erc7007Contracts": [],
+        "erc7579Accounts": []
+      }
+    }
+  ]
+}
