@@ -43,6 +43,13 @@
       "when": 1771010000000,
       "tag": "0006_pipeline_split_scalability",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1771100000000,
+      "tag": "0007_drop_redundant_topic_index",
+      "breakpoints": true
     }
   ]
 }

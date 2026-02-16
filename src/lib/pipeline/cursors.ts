@@ -30,28 +30,18 @@ export async function getStageCursor(
   stage: CursorStage,
   scope: string = GLOBAL_CURSOR_SCOPE
 ): Promise<StageCursor | null> {
-  const queryApi = (db as unknown as { query?: Record<string, unknown> }).query;
-  const cursorQuery = queryApi?.pipelineStageCursors as
-    | { findFirst?: (args: unknown) => Promise<unknown> }
-    | undefined;
-  const findFirst = cursorQuery?.findFirst;
+  const rows = await db
+    .select()
+    .from(pipelineStageCursors)
+    .where(
+      and(
+        eq(pipelineStageCursors.stage, stage),
+        eq(pipelineStageCursors.scope, scope)
+      )
+    )
+    .limit(1);
 
-  if (!findFirst) {
-    return null;
-  }
-
-  const row = (await findFirst({
-    where: and(eq(pipelineStageCursors.stage, stage), eq(pipelineStageCursors.scope, scope)),
-  })) as
-    | {
-        stage: string;
-        scope: string;
-        cursorTs: Date;
-        cursorMeta: Record<string, unknown> | null;
-        updatedAt: Date;
-      }
-    | null;
-
+  const row = rows[0];
   if (!row) return null;
 
   return {
@@ -69,21 +59,16 @@ export async function setStageCursor(
   cursorTs: Date,
   cursorMeta?: Record<string, unknown>
 ): Promise<void> {
-  const values = {
-    stage,
-    scope,
-    cursorTs,
-    cursorMeta: cursorMeta ?? {},
-    updatedAt: new Date(),
-  };
-
-  const insertBuilder = db.insert(pipelineStageCursors).values(values) as {
-    onConflictDoUpdate?: (args: unknown) => Promise<unknown>;
-    onConflictDoNothing?: (args?: unknown) => { returning?: (args?: unknown) => Promise<unknown> };
-  };
-
-  if (insertBuilder.onConflictDoUpdate) {
-    await insertBuilder.onConflictDoUpdate({
+  await db
+    .insert(pipelineStageCursors)
+    .values({
+      stage,
+      scope,
+      cursorTs,
+      cursorMeta: cursorMeta ?? {},
+      updatedAt: new Date(),
+    })
+    .onConflictDoUpdate({
       target: [pipelineStageCursors.stage, pipelineStageCursors.scope],
       set: {
         cursorTs,
@@ -91,13 +76,4 @@ export async function setStageCursor(
         updatedAt: new Date(),
       },
     });
-    return;
-  }
-
-  if (insertBuilder.onConflictDoNothing) {
-    const chain = insertBuilder.onConflictDoNothing();
-    if (chain?.returning) {
-      await chain.returning();
-    }
-  }
 }

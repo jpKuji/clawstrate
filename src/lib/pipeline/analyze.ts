@@ -32,28 +32,7 @@ export interface MarketplaceMetrics {
   recentPostingCadence: number;
 }
 
-function extractRows<T>(result: unknown): T[] {
-  if (Array.isArray(result)) return result as T[];
-  if (result && typeof result === "object" && "rows" in (result as Record<string, unknown>)) {
-    const rows = (result as { rows?: unknown }).rows;
-    return Array.isArray(rows) ? (rows as T[]) : [];
-  }
-  return [];
-}
-
-function toNumber(value: unknown, fallback = 0): number {
-  const n = Number(value);
-  return Number.isFinite(n) ? n : fallback;
-}
-
-function chunk<T>(items: T[], size: number): T[][] {
-  if (items.length === 0) return [];
-  const chunks: T[][] = [];
-  for (let i = 0; i < items.length; i += size) {
-    chunks.push(items.slice(i, i + size));
-  }
-  return chunks;
-}
+import { extractRows, toNumber, chunk } from "./utils";
 
 export async function computeMarketplaceAgentMetrics(
   agentId: string
@@ -466,7 +445,7 @@ export async function runAnalysis(): Promise<{
               a.agent_id,
               COUNT(*) FILTER (WHERE e.is_substantive = true)::int AS substantive_count,
               COUNT(*) FILTER (
-                WHERE e.is_substantive = false OR e.is_substantive IS NULL
+                WHERE a.is_enriched = true AND (e.is_substantive = false OR e.is_substantive IS NULL)
               )::int AS non_substantive_count,
               COUNT(*) FILTER (WHERE a.is_enriched = false)::int AS unenriched_count
             FROM actions a

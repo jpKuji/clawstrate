@@ -14,11 +14,6 @@ export async function GET(req: NextRequest) {
 }
 
 async function handler(req: NextRequest) {
-  const authHeader = req.headers.get("authorization");
-  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
   if (!isSplitPipelineEnabled()) {
     return NextResponse.json({ status: "skipped", reason: "split_jobs_disabled" });
   }

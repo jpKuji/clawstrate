@@ -387,7 +387,6 @@ export const actionTopics = pgTable(
   },
   (t) => [
     uniqueIndex("idx_action_topic_unique").on(t.actionId, t.topicId),
-    index("idx_action_topic_topic").on(t.topicId),
     index("idx_action_topic_topic_action").on(t.topicId, t.actionId),
   ]
 );

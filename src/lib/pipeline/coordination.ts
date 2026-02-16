@@ -12,6 +12,7 @@ import {
   GLOBAL_CURSOR_SCOPE,
   setStageCursor,
 } from "./cursors";
+import { extractRows, toNumber, chunk } from "./utils";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const MAX_CANDIDATES_PER_AGENT = 40;
@@ -37,29 +38,6 @@ function twoHourBucket(date: Date): Date {
   const currentHour = d.getUTCHours();
   d.setUTCHours(Math.floor(currentHour / 2) * 2);
   return d;
-}
-
-function extractRows<T>(result: unknown): T[] {
-  if (Array.isArray(result)) return result as T[];
-  if (result && typeof result === "object" && "rows" in (result as Record<string, unknown>)) {
-    const rows = (result as { rows?: unknown }).rows;
-    return Array.isArray(rows) ? (rows as T[]) : [];
-  }
-  return [];
-}
-
-function toNumber(value: unknown, fallback = 0): number {
-  const n = Number(value);
-  return Number.isFinite(n) ? n : fallback;
-}
-
-function chunk<T>(items: T[], size: number): T[][] {
-  if (items.length === 0) return [];
-  const chunks: T[][] = [];
-  for (let i = 0; i < items.length; i += size) {
-    chunks.push(items.slice(i, i + size));
-  }
-  return chunks;
 }
 
 async function bulkInsertSignals(
