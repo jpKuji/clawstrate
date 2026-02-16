@@ -14,7 +14,15 @@ export const PIPELINE_RUNTIME_CADENCE = {
   orchestratedCron: "*/30 * * * *",
   orchestratedRoute: "/api/cron/pipeline",
   orchestratedBehavior:
-    "Each orchestrated run executes all six stages in order: ingest, enrich, analyze, aggregate, coordination, briefing.",
+    "The orchestrated route always runs ingest + enrich. When PIPELINE_SPLIT_JOBS=true, heavy stages are delegated to dedicated schedules.",
+  analyzeCron: "5 */2 * * *",
+  analyzeRoute: "/api/cron/analyze",
+  aggregateCron: "15 */2 * * *",
+  aggregateRoute: "/api/cron/aggregate",
+  coordinationCron: "25 */2 * * *",
+  coordinationRoute: "/api/cron/coordination",
+  briefingCron: "0 */6 * * *",
+  briefingRoute: "/api/cron/briefing",
   weeklyExecutiveCron: "0 9 * * 1",
   weeklyExecutiveRoute: "/api/cron/briefing-weekly",
   weeklyExecutiveBehavior:

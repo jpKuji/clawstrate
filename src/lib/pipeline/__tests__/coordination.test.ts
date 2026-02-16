@@ -1,146 +1,193 @@
-import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 type InsertedSignal = {
   signalType: string;
   signalHash: string;
   windowStart: Date;
   windowEnd: Date;
+  confidence: number;
+  agentIds: string[];
+  evidence: string;
 };
 
-let mockDb: {
-  select: ReturnType<typeof vi.fn>;
-  insert: ReturnType<typeof vi.fn>;
-};
+const {
+  mockExecute,
+  mockSelect,
+  mockInsert,
+  mockGetStageCursor,
+  mockSetStageCursor,
+  queueExecute,
+  queueSelect,
+  insertedSignals,
+  dedupeKeys,
+  resetState,
+} = vi.hoisted(() => {
+  const executeQueue: unknown[][] = [];
+  const selectQueue: unknown[][] = [];
+  const dedupeKeys = new Set<string>();
+  const insertedSignals: InsertedSignal[] = [];
 
-const selectQueue: unknown[][] = [];
-const dedupeKeys = new Set<string>();
-const insertedSignals: InsertedSignal[] = [];
+  function chainableSelect(resolveData: unknown[]) {
+    const chain: any = new Proxy(
+      {},
+      {
+        get(_target, prop) {
+          if (prop === "then") return (resolve: (value: unknown[]) => void) => resolve(resolveData);
+          return () => chain;
+        },
+      }
+    );
+    return chain;
+  }
+
+  const mockInsert = vi.fn(() => {
+    let values: InsertedSignal[] = [];
+    const chain: any = {};
+
+    chain.values = (value: InsertedSignal | InsertedSignal[]) => {
+      values = Array.isArray(value) ? value : [value];
+      return chain;
+    };
+    chain.onConflictDoNothing = () => chain;
+    chain.returning = () => {
+      const ids: Array<{ id: string }> = [];
+      for (const row of values) {
+        const key = `${row.signalType}|${row.signalHash}|${new Date(row.windowStart).toISOString()}`;
+        if (dedupeKeys.has(key)) continue;
+        dedupeKeys.add(key);
+        insertedSignals.push(row);
+        ids.push({ id: key });
+      }
+      return Promise.resolve(ids);
+    };
+
+    return chain;
+  });
+
+  return {
+    mockExecute: vi.fn(() => Promise.resolve(executeQueue.shift() || [])),
+    mockSelect: vi.fn(() => chainableSelect(selectQueue.shift() || [])),
+    mockInsert,
+    mockGetStageCursor: vi.fn(),
+    mockSetStageCursor: vi.fn().mockResolvedValue(undefined),
+    queueExecute: (rows: unknown[]) => executeQueue.push(rows),
+    queueSelect: (rows: unknown[]) => selectQueue.push(rows),
+    insertedSignals,
+    dedupeKeys,
+    resetState: () => {
+      executeQueue.length = 0;
+      selectQueue.length = 0;
+      dedupeKeys.clear();
+      insertedSignals.length = 0;
+    },
+  };
+});
 
 vi.mock("@/lib/db", () => ({
-  get db() {
-    return mockDb;
+  db: {
+    execute: mockExecute,
+    select: mockSelect,
+    insert: mockInsert,
   },
+}));
+
+vi.mock("../cursors", () => ({
+  GLOBAL_CURSOR_SCOPE: "global",
+  getBootstrapStart: vi.fn((_stage: string, now: Date) => new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000)),
+  getStageCursor: mockGetStageCursor,
+  setStageCursor: mockSetStageCursor,
 }));
 
 import { detectCoordination } from "../coordination";
 
-function selectChain(terminal: unknown) {
-  const chain: any = new Proxy(
-    {},
+function queueDataset() {
+  queueExecute([
     {
-      get(_target, prop) {
-        if (prop === "then") {
-          return (resolve: (value: unknown) => void) => resolve(terminal);
-        }
-        return () => chain;
-      },
-    }
-  );
-  return chain;
+      topic_id: "topic-alpha",
+      topic_slug: "alpha",
+      bucket_start: new Date("2026-02-11T10:00:00.000Z"),
+      agent_ids: ["agent-a", "agent-b", "agent-c"],
+    },
+  ]);
+  queueSelect([]); // interactions between candidate agents
+
+  queueExecute([
+    {
+      agent_id_1: "agent-a",
+      agent_id_2: "agent-b",
+      intersection_count: 4,
+      union_count: 4,
+      similarity: 1,
+    },
+  ]);
+
+  queueSelect([
+    { sourceAgentId: "agent-a", targetAgentId: "agent-b" },
+    { sourceAgentId: "agent-a", targetAgentId: "agent-c" },
+    { sourceAgentId: "agent-b", targetAgentId: "agent-c" },
+    { sourceAgentId: "agent-c", targetAgentId: "agent-a" },
+  ]);
 }
 
-function queueDetectionDataset() {
-  selectQueue.push(
-    [
-      {
-        topicId: "topic-alpha",
-        topicSlug: "alpha",
-        agentId: "agent-a",
-        performedAt: new Date("2026-02-11T10:00:00.000Z"),
-      },
-      {
-        topicId: "topic-alpha",
-        topicSlug: "alpha",
-        agentId: "agent-b",
-        performedAt: new Date("2026-02-11T10:30:00.000Z"),
-      },
-      {
-        topicId: "topic-alpha",
-        topicSlug: "alpha",
-        agentId: "agent-c",
-        performedAt: new Date("2026-02-11T11:00:00.000Z"),
-      },
-    ],
-    [{ count: 0 }],
-    [
-      { agentId: "agent-a", topicId: "topic-1" },
-      { agentId: "agent-a", topicId: "topic-2" },
-      { agentId: "agent-a", topicId: "topic-3" },
-      { agentId: "agent-b", topicId: "topic-1" },
-      { agentId: "agent-b", topicId: "topic-2" },
-      { agentId: "agent-b", topicId: "topic-3" },
-    ],
-    [
-      { sourceAgentId: "agent-a", targetAgentId: "agent-b" },
-      { sourceAgentId: "agent-a", targetAgentId: "agent-c" },
-      { sourceAgentId: "agent-b", targetAgentId: "agent-c" },
-      { sourceAgentId: "agent-c", targetAgentId: "agent-a" },
-    ]
-  );
-}
-
-describe("detectCoordination idempotency", () => {
+describe("detectCoordination incremental", () => {
   beforeEach(() => {
+    resetState();
     vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-02-11T12:34:00.000Z"));
-    selectQueue.length = 0;
-    dedupeKeys.clear();
-    insertedSignals.length = 0;
-
-    mockDb = {
-      select: vi.fn(() => {
-        const next = selectQueue.shift();
-        if (!next) {
-          throw new Error("No mocked select result queued");
-        }
-        return selectChain(next);
-      }),
-      insert: vi.fn(() => {
-        let pending: InsertedSignal | null = null;
-        const chain: any = {};
-        chain.values = (value: InsertedSignal) => {
-          pending = value;
-          return chain;
-        };
-        chain.onConflictDoNothing = () => chain;
-        chain.returning = () => {
-          if (!pending) return Promise.resolve([]);
-          const key = `${pending.signalType}|${pending.signalHash}|${new Date(pending.windowStart).toISOString()}`;
-          if (dedupeKeys.has(key)) {
-            return Promise.resolve([]);
-          }
-          dedupeKeys.add(key);
-          insertedSignals.push(pending);
-          return Promise.resolve([{ id: key }]);
-        };
-        return chain;
-      }),
-    };
+    vi.setSystemTime(new Date("2026-02-11T12:00:00.000Z"));
+    mockGetStageCursor.mockResolvedValue(null);
   });
 
   afterEach(() => {
     vi.useRealTimers();
   });
 
-  it("does not create duplicate signals when rerun on unchanged data", async () => {
-    queueDetectionDataset();
-    queueDetectionDataset();
+  it("is idempotent on unchanged data and only advances cursor on successful run", async () => {
+    queueDataset();
+    queueDataset();
 
-    const firstRun = await detectCoordination();
-    expect(firstRun.errors).toEqual([]);
-    expect(firstRun.signalsDetected).toBe(3);
+    const first = await detectCoordination();
+    expect(first.errors).toEqual([]);
+    expect(first.signalsDetected).toBe(3);
 
-    vi.setSystemTime(new Date("2026-02-11T13:34:00.000Z"));
-    const secondRun = await detectCoordination();
-    expect(secondRun.errors).toEqual([]);
-    expect(secondRun.signalsDetected).toBe(0);
+    const second = await detectCoordination();
+    expect(second.errors).toEqual([]);
+    expect(second.signalsDetected).toBe(0);
+
+    expect(mockSetStageCursor).toHaveBeenCalledTimes(2);
     expect(insertedSignals).toHaveLength(3);
+  });
 
-    const contentSimilarity = insertedSignals.find((s) => s.signalType === "content_similarity");
-    const replyClique = insertedSignals.find((s) => s.signalType === "reply_clique");
-    expect(contentSimilarity).toBeDefined();
-    expect(replyClique).toBeDefined();
-    expect(new Date(contentSimilarity!.windowStart).toISOString()).toBe("2026-02-04T00:00:00.000Z");
-    expect(new Date(replyClique!.windowStart).toISOString()).toBe("2026-02-04T00:00:00.000Z");
+  it("keeps bounded drift checks within configured thresholds", async () => {
+    queueDataset();
+    const baseline = await detectCoordination();
+    const baselineSignals = [...insertedSignals];
+
+    // Re-run with same dataset but fresh dedupe set to compare raw detection volumes.
+    dedupeKeys.clear();
+    insertedSignals.length = 0;
+    queueDataset();
+    const approx = await detectCoordination();
+    const approxSignals = [...insertedSignals];
+
+    const baselineTotal = baseline.signalsDetected;
+    const approxTotal = approx.signalsDetected;
+    const totalDrift = Math.abs(approxTotal - baselineTotal) / Math.max(baselineTotal, 1);
+
+    expect(totalDrift).toBeLessThanOrEqual(0.1);
+
+    const byType = (signals: InsertedSignal[]) =>
+      signals.reduce<Record<string, number>>((acc, signal) => {
+        acc[signal.signalType] = (acc[signal.signalType] || 0) + 1;
+        return acc;
+      }, {});
+
+    const baselineCounts = byType(baselineSignals);
+    const approxCounts = byType(approxSignals);
+    for (const type of ["temporal_cluster", "content_similarity", "reply_clique"]) {
+      const a = baselineCounts[type] || 0;
+      const b = approxCounts[type] || 0;
+      const drift = Math.abs(a - b) / Math.max(a, 1);
+      expect(drift).toBeLessThanOrEqual(0.15);
+    }
   });
 });

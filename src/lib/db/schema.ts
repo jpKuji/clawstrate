@@ -10,6 +10,7 @@ import {
   index,
   uniqueIndex,
   pgEnum,
+  primaryKey,
 } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
 
@@ -225,6 +226,9 @@ export const actions = pgTable(
     index("idx_action_community").on(t.communityId),
     index("idx_action_enriched").on(t.isEnriched),
     index("idx_action_parent").on(t.parentActionId),
+    index("idx_action_ingested_platform").on(t.ingestedAt, t.platformId),
+    index("idx_action_agent_performed").on(t.agentId, t.performedAt),
+    index("idx_action_performed_agent").on(t.performedAt, t.agentId),
   ]
 );
 
@@ -287,6 +291,7 @@ export const enrichments = pgTable(
     index("idx_enrichment_sentiment").on(t.sentiment),
     index("idx_enrichment_originality").on(t.originalityScore),
     index("idx_enrichment_coordination").on(t.coordinationSignal),
+    index("idx_enrichment_processed_action").on(t.processedAt, t.actionId),
   ]
 );
 
@@ -383,6 +388,7 @@ export const actionTopics = pgTable(
   (t) => [
     uniqueIndex("idx_action_topic_unique").on(t.actionId, t.topicId),
     index("idx_action_topic_topic").on(t.topicId),
+    index("idx_action_topic_topic_action").on(t.topicId, t.actionId),
   ]
 );
 
@@ -409,6 +415,11 @@ export const interactions = pgTable(
     index("idx_interaction_source").on(t.sourceAgentId),
     index("idx_interaction_target").on(t.targetAgentId),
     index("idx_interaction_created").on(t.createdAt),
+    index("idx_interaction_created_source_target").on(
+      t.createdAt,
+      t.sourceAgentId,
+      t.targetAgentId
+    ),
   ]
 );
 
@@ -533,6 +544,26 @@ export const pipelineStageRuns = pgTable(
   (t) => [
     uniqueIndex("idx_pipeline_stage_run_unique").on(t.pipelineRunId, t.stage),
     index("idx_pipeline_stage_stage").on(t.stage),
+    index("idx_pipeline_stage_status_completed").on(
+      t.stage,
+      t.status,
+      t.completedAt
+    ),
+  ]
+);
+
+export const pipelineStageCursors = pgTable(
+  "pipeline_stage_cursors",
+  {
+    stage: text("stage").notNull(),
+    scope: text("scope").notNull(),
+    cursorTs: timestamp("cursor_ts").notNull(),
+    cursorMeta: jsonb("cursor_meta").$type<Record<string, unknown>>(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (t) => [
+    primaryKey({ name: "pipeline_stage_cursors_pk", columns: [t.stage, t.scope] }),
+    index("idx_pipeline_stage_cursors_updated").on(t.updatedAt),
   ]
 );
 

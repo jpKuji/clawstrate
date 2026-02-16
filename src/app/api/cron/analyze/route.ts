@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { runAnalysis } from "@/lib/pipeline/analyze";
-import { acquireLock, invalidateApiCaches } from "@/lib/redis";
+import { runLoggedStage } from "@/lib/pipeline/stage-run";
+import { isSplitPipelineEnabled } from "@/lib/pipeline/split";
 
 export const maxDuration = 300;
 
@@ -18,21 +19,15 @@ async function handler(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const release = await acquireLock("analyze", 300);
-  if (!release) {
-    return NextResponse.json({ status: "skipped", reason: "already running" });
+  if (!isSplitPipelineEnabled()) {
+    return NextResponse.json({ status: "skipped", reason: "split_jobs_disabled" });
   }
 
-  try {
-    const result = await runAnalysis();
-    await invalidateApiCaches();
-    return NextResponse.json({ status: "completed", ...result });
-  } catch (e: any) {
-    return NextResponse.json(
-      { status: "error", error: e.message },
-      { status: 500 }
-    );
-  } finally {
-    await release();
-  }
+  return runLoggedStage({
+    req,
+    stage: "analyze",
+    lockKey: "analyze",
+    lockTtlSeconds: 300,
+    execute: () => runAnalysis(),
+  });
 }

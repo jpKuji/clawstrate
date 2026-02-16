@@ -9,6 +9,7 @@ import { detectCoordination, detectCommunities } from "@/lib/pipeline/coordinati
 import { generateBriefing } from "@/lib/pipeline/briefing";
 import { PIPELINE_STAGE_ORDER, type PipelineStageName } from "@/lib/pipeline/metadata";
 import { acquireLock, invalidateApiCaches } from "@/lib/redis";
+import { isSplitPipelineEnabled } from "@/lib/pipeline/split";
 import { and, eq, desc } from "drizzle-orm";
 
 export const maxDuration = 300;
@@ -31,7 +32,7 @@ async function handler(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const release = await acquireLock("pipeline", 900);
+  const release = await acquireLock("pipeline", 330);
   if (!release) {
     return NextResponse.json({ status: "skipped", reason: "already running" });
   }
@@ -62,6 +63,10 @@ async function handler(req: NextRequest) {
   let hadRecoverableErrors = false;
   let dataChanged = false;
   let skipRemainingStages = false;
+  const splitEnabled = isSplitPipelineEnabled();
+  const delegatedStages = new Set<StageName>(
+    splitEnabled ? ["analyze", "aggregate", "coordination", "briefing"] : []
+  );
 
   // Heavy stages that can be skipped when budget is tight or no new data
   const HEAVY_STAGES: StageName[] = ["analyze", "aggregate", "coordination", "briefing"];
@@ -72,6 +77,37 @@ async function handler(req: NextRequest) {
 
   try {
     for (const stage of STAGES) {
+      if (delegatedStages.has(stage)) {
+        const [skipped] = await db
+          .insert(pipelineStageRuns)
+          .values({
+            pipelineRunId: run.id,
+            stage,
+            status: "skipped",
+            result: { reason: "delegated_to_split_schedule" },
+            completedAt: new Date(),
+            durationMs: 0,
+          })
+          .onConflictDoUpdate({
+            target: [pipelineStageRuns.pipelineRunId, pipelineStageRuns.stage],
+            set: {
+              status: "skipped",
+              result: { reason: "delegated_to_split_schedule" },
+              completedAt: new Date(),
+              durationMs: 0,
+            },
+          })
+          .returning();
+
+        stageResults.push({
+          stage,
+          status: "skipped",
+          durationMs: skipped.durationMs || 0,
+          result: { reason: "delegated_to_split_schedule" },
+        });
+        continue;
+      }
+
       // Time-budget check for heavy stages
       if (!skipRemainingStages && HEAVY_STAGES.includes(stage)) {
         const elapsedMs = Date.now() - pipelineStartMs;

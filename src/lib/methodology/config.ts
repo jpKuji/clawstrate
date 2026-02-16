@@ -48,7 +48,7 @@ export const GLOBAL_METHODOLOGY_CONFIG: GlobalMethodologyConfig = {
   title: "Methodology",
   description: "How CLAWSTRATE collects, processes, and scores AI agent behavior",
   intro:
-    "CLAWSTRATE uses a strict orchestration pipeline to transform raw platform activity into behavioral intelligence. This page is generated from typed methodology metadata to keep documentation aligned with runtime logic.",
+    "CLAWSTRATE uses a split-capable orchestration pipeline to transform raw platform activity into behavioral intelligence. This page is generated from typed methodology metadata to keep documentation aligned with runtime logic.",
   pipelineSummary: PIPELINE_RUNTIME_CADENCE.orchestratedBehavior,
   stages: PIPELINE_STAGE_ORDER.map((id) => ({
     id,
@@ -175,9 +175,29 @@ export const GLOBAL_METHODOLOGY_CONFIG: GlobalMethodologyConfig = {
     "Network view renders top influence agents and weighted interaction edges, with community labels available for segmentation.",
   freshnessRows: [
     {
-      data: "Orchestrated intelligence pipeline",
+      data: "Orchestrated ingest + enrich",
       updateFrequency: `Every 30 minutes (${PIPELINE_RUNTIME_CADENCE.orchestratedCron})`,
-      lookbackWindow: "Stage-specific windows inside each orchestrated run",
+      lookbackWindow: "Continuous source polling and enrichment windows",
+    },
+    {
+      data: "Analyze stage",
+      updateFrequency: `Every 2 hours (${PIPELINE_RUNTIME_CADENCE.analyzeCron})`,
+      lookbackWindow: "Incremental cursor + 14-day behavior windows",
+    },
+    {
+      data: "Aggregate stage",
+      updateFrequency: `Every 2 hours (${PIPELINE_RUNTIME_CADENCE.aggregateCron})`,
+      lookbackWindow: "Impacted UTC days from incremental cursor deltas",
+    },
+    {
+      data: "Coordination stage",
+      updateFrequency: `Every 2 hours (${PIPELINE_RUNTIME_CADENCE.coordinationCron})`,
+      lookbackWindow: "Incremental cursor + 24h/7d detection windows",
+    },
+    {
+      data: "Operational briefing",
+      updateFrequency: `Every 6 hours (${PIPELINE_RUNTIME_CADENCE.briefingCron})`,
+      lookbackWindow: "Previous 6 hours",
     },
     {
       data: "Weekly executive briefing",
@@ -214,7 +234,31 @@ export const CURRENT_RUNTIME_CADENCE_ROWS = [
     process: "Orchestrated pipeline trigger",
     cadence: PIPELINE_RUNTIME_CADENCE.orchestratedCron,
     route: PIPELINE_RUNTIME_CADENCE.orchestratedRoute,
-    behavior: "Runs all six stages in strict order with dependency gating and run metadata.",
+    behavior: "Runs ingest + enrich. In split mode, marks heavy stages as delegated to standalone schedules.",
+  },
+  {
+    process: "Analyze trigger",
+    cadence: PIPELINE_RUNTIME_CADENCE.analyzeCron,
+    route: PIPELINE_RUNTIME_CADENCE.analyzeRoute,
+    behavior: "Cursor-driven heavy stage run with standalone stage metadata.",
+  },
+  {
+    process: "Aggregate trigger",
+    cadence: PIPELINE_RUNTIME_CADENCE.aggregateCron,
+    route: PIPELINE_RUNTIME_CADENCE.aggregateRoute,
+    behavior: "Impacted-day incremental aggregation and co-occurrence recomputation.",
+  },
+  {
+    process: "Coordination trigger",
+    cadence: PIPELINE_RUNTIME_CADENCE.coordinationCron,
+    route: PIPELINE_RUNTIME_CADENCE.coordinationRoute,
+    behavior: "Bounded-runtime coordination detection plus community labeling.",
+  },
+  {
+    process: "Operational briefing trigger",
+    cadence: PIPELINE_RUNTIME_CADENCE.briefingCron,
+    route: PIPELINE_RUNTIME_CADENCE.briefingRoute,
+    behavior: "Independent 6-hour narrative generation not gated by heavy pipeline stages.",
   },
   {
     process: "Weekly executive briefing trigger",

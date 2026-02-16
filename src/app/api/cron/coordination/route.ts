@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { detectCoordination, detectCommunities } from "@/lib/pipeline/coordination";
-import { acquireLock, invalidateApiCaches } from "@/lib/redis";
+import { runLoggedStage } from "@/lib/pipeline/stage-run";
+import { isSplitPipelineEnabled } from "@/lib/pipeline/split";
 
 export const maxDuration = 300; // 5 minutes max
 
@@ -18,26 +19,22 @@ async function handler(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const release = await acquireLock("coordination", 300);
-  if (!release) {
-    return NextResponse.json({ status: "skipped", reason: "already running" });
+  if (!isSplitPipelineEnabled()) {
+    return NextResponse.json({ status: "skipped", reason: "split_jobs_disabled" });
   }
 
-  try {
-    const coordResult = await detectCoordination();
-    const communityResult = await detectCommunities();
-    await invalidateApiCaches();
-    return NextResponse.json({
-      status: "completed",
-      ...coordResult,
-      communities: communityResult,
-    });
-  } catch (e: any) {
-    return NextResponse.json(
-      { status: "error", error: e.message },
-      { status: 500 }
-    );
-  } finally {
-    await release();
-  }
+  return runLoggedStage({
+    req,
+    stage: "coordination",
+    lockKey: "coordination",
+    lockTtlSeconds: 300,
+    execute: async () => {
+      const coordResult = await detectCoordination();
+      const communityResult = await detectCommunities();
+      return {
+        ...coordResult,
+        communities: communityResult,
+      };
+    },
+  });
 }

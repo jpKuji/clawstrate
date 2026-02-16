@@ -1,312 +1,168 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { mockDbTopic } from "@/__tests__/mocks/fixtures";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-// --- Hoisted mock state ---
-const { mockSelect, mockInsert, mockUpdate, mockTopicsFindMany } = vi.hoisted(() => {
-  function chainableSelect(resolveData: any[]) {
-    const chain: any = new Proxy({}, {
-      get(_, prop) {
-        if (prop === "then") return (resolve: any) => resolve(resolveData);
-        return () => chain;
-      },
-    });
-    return chain;
-  }
+const {
+  mockExecute,
+  mockSelect,
+  mockInsert,
+  mockGetStageCursor,
+  mockSetStageCursor,
+  queueSelectResult,
+} = vi.hoisted(() => {
+  const selectQueue: unknown[][] = [];
 
-  function chainable(terminal?: unknown) {
-    const chain: any = new Proxy({}, {
-      get(_, prop) {
-        if (prop === "then") return undefined;
-        if (prop === "returning") return () => Promise.resolve(terminal ?? [{ id: "test-uuid" }]);
-        return () => chain;
-      },
-    });
+  function chainableSelect(resolveData: unknown[]) {
+    const chain: any = new Proxy(
+      {},
+      {
+        get(_target, prop) {
+          if (prop === "then") return (resolve: (value: unknown[]) => void) => resolve(resolveData);
+          return () => chain;
+        },
+      }
+    );
     return chain;
   }
 
   return {
-    mockSelect: vi.fn(() => chainableSelect([])),
-    mockInsert: vi.fn(() => chainable([{ id: "test-uuid" }])),
-    mockUpdate: vi.fn(() => chainable()),
-    mockTopicsFindMany: vi.fn().mockResolvedValue([]),
-    chainableSelect,
-    chainable,
+    mockExecute: vi.fn(),
+    mockSelect: vi.fn(() => chainableSelect(selectQueue.shift() || [])),
+    mockInsert: vi.fn(() => ({ values: vi.fn().mockResolvedValue([]) })),
+    mockGetStageCursor: vi.fn(),
+    mockSetStageCursor: vi.fn().mockResolvedValue(undefined),
+    queueSelectResult: (rows: unknown[]) => selectQueue.push(rows),
   };
 });
 
 vi.mock("@/lib/db", () => ({
   db: {
+    execute: mockExecute,
     select: mockSelect,
     insert: mockInsert,
-    update: mockUpdate,
-    query: {
-      topics: { findMany: mockTopicsFindMany, findFirst: vi.fn().mockResolvedValue(null) },
-      agents: { findMany: vi.fn().mockResolvedValue([]), findFirst: vi.fn().mockResolvedValue(null) },
-      actions: { findMany: vi.fn().mockResolvedValue([]), findFirst: vi.fn().mockResolvedValue(null) },
-      enrichments: { findMany: vi.fn().mockResolvedValue([]), findFirst: vi.fn().mockResolvedValue(null) },
-      interactions: { findMany: vi.fn().mockResolvedValue([]), findFirst: vi.fn().mockResolvedValue(null) },
-      agentProfiles: { findMany: vi.fn().mockResolvedValue([]), findFirst: vi.fn().mockResolvedValue(null) },
-      actionTopics: { findMany: vi.fn().mockResolvedValue([]), findFirst: vi.fn().mockResolvedValue(null) },
-    },
   },
+}));
+
+vi.mock("../cursors", () => ({
+  GLOBAL_CURSOR_SCOPE: "global",
+  getBootstrapStart: vi.fn((stage: string, now: Date) => {
+    if (stage === "aggregate") return new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    return new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
+  }),
+  getStageCursor: mockGetStageCursor,
+  setStageCursor: mockSetStageCursor,
 }));
 
 import { runAnalysis } from "../analyze";
 
-// Local reference to helper
-function chainableSelect(resolveData: any[]) {
-  const chain: any = new Proxy({}, {
-    get(_, prop) {
-      if (prop === "then") return (resolve: any) => resolve(resolveData);
-      return () => chain;
-    },
-  });
-  return chain;
-}
-
-describe("runAnalysis", () => {
+describe("runAnalysis incremental", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockTopicsFindMany.mockResolvedValue([]);
+    mockGetStageCursor.mockResolvedValue(null);
   });
 
-  it("computes influence scores based on incoming interaction weights", async () => {
-    mockSelect.mockReturnValueOnce(
-      chainableSelect([
-        { agentId: "agent-001", totalWeight: 10, interactionCount: 5 },
-        { agentId: "agent-002", totalWeight: 5, interactionCount: 3 },
-      ])
-    );
-    mockSelect
-      .mockReturnValueOnce(chainableSelect([{ avgAutonomy: "0.8" }]))
-      .mockReturnValueOnce(chainableSelect([{ actionType: "post", count: 30 }, { actionType: "comment", count: 10 }]))
-      .mockReturnValueOnce(chainableSelect([{ count: 5 }]));
-    mockSelect
-      .mockReturnValueOnce(chainableSelect([{ avgAutonomy: "0.6" }]))
-      .mockReturnValueOnce(chainableSelect([{ actionType: "post", count: 5 }, { actionType: "comment", count: 25 }]))
-      .mockReturnValueOnce(chainableSelect([{ count: 2 }]));
+  it("bootstraps first run and no-ops when no entities changed", async () => {
+    mockExecute
+      .mockResolvedValueOnce([]) // changed agents
+      .mockResolvedValueOnce([]); // changed topics
 
     const result = await runAnalysis();
 
-    expect(result.agentsUpdated).toBe(3);
-    expect(mockUpdate).toHaveBeenCalled();
+    expect(result).toEqual({ agentsUpdated: 0, topicsUpdated: 0 });
+    expect(mockSetStageCursor).toHaveBeenCalledOnce();
+    expect(mockSetStageCursor.mock.calls[0][2]).toBeInstanceOf(Date);
+    expect(mockSetStageCursor.mock.calls[0][3]).toMatchObject({ reason: "no_changes" });
   });
 
-  it("normalizes influence scores to 0-1 range", async () => {
-    mockSelect.mockReturnValueOnce(
-      chainableSelect([
-        { agentId: "agent-001", totalWeight: 100, interactionCount: 50 },
-        { agentId: "agent-002", totalWeight: 50, interactionCount: 25 },
-      ])
-    );
-    mockSelect
-      .mockReturnValueOnce(chainableSelect([{ avgAutonomy: "0.5" }]))
-      .mockReturnValueOnce(chainableSelect([]))
-      .mockReturnValueOnce(chainableSelect([{ count: 0 }]));
-    mockSelect
-      .mockReturnValueOnce(chainableSelect([{ avgAutonomy: "0.5" }]))
-      .mockReturnValueOnce(chainableSelect([]))
-      .mockReturnValueOnce(chainableSelect([{ count: 0 }]));
+  it("recomputes only changed entities and advances cursor on success", async () => {
+    const now = new Date("2026-02-13T12:00:00.000Z");
+    vi.useFakeTimers();
+    vi.setSystemTime(now);
+
+    mockGetStageCursor.mockResolvedValueOnce({
+      stage: "analyze",
+      scope: "global",
+      cursorTs: new Date("2026-02-13T10:00:00.000Z"),
+      cursorMeta: null,
+      updatedAt: new Date("2026-02-13T10:00:00.000Z"),
+    });
+
+    mockExecute
+      .mockResolvedValueOnce([{ agent_id: "agent-1" }]) // changed agents
+      .mockResolvedValueOnce([{ topic_id: "topic-1" }]) // changed topics
+      .mockResolvedValueOnce([{ action_id: "action-1" }]) // substantive
+      .mockResolvedValueOnce([{ agent_id: "agent-1", avg_autonomy: 0.7 }]) // autonomy
+      .mockResolvedValueOnce([
+        { agent_id: "agent-1", action_type: "post", count: 5 },
+        { agent_id: "agent-1", action_type: "comment", count: 2 },
+      ]) // breakdown
+      .mockResolvedValueOnce([
+        {
+          agent_id: "agent-1",
+          substantive_count: 2,
+          non_substantive_count: 1,
+          unenriched_count: 0,
+        },
+      ]) // recent counts
+      .mockResolvedValueOnce([
+        { topic_id: "topic-1", recent_count: 12, agent_count: 3, avg_sentiment: 0.2 },
+      ]) // topic stats
+      .mockResolvedValue([]); // fallback for update queries
+
+    queueSelectResult([{ agentId: "agent-1" }]); // active agents
+    queueSelectResult([
+      { sourceAgentId: "agent-1", targetAgentId: "agent-2", weight: 1, actionId: "action-1" },
+    ]); // interactions
+    queueSelectResult([]); // identities
+    queueSelectResult([{ id: "agent-1", firstSeenAt: new Date("2026-02-10T00:00:00.000Z") }]); // first seen
+    queueSelectResult([
+      {
+        agentId: "agent-1",
+        date: new Date("2026-02-10T00:00:00.000Z"),
+        postCount: 2,
+        commentCount: 1,
+        activeHours: [10],
+      },
+      {
+        agentId: "agent-1",
+        date: new Date("2026-02-11T00:00:00.000Z"),
+        postCount: 2,
+        commentCount: 1,
+        activeHours: [10],
+      },
+      {
+        agentId: "agent-1",
+        date: new Date("2026-02-12T00:00:00.000Z"),
+        postCount: 3,
+        commentCount: 1,
+        activeHours: [11],
+      },
+    ]); // daily stats
 
     const result = await runAnalysis();
 
-    expect(result.agentsUpdated).toBe(3);
-    expect(mockUpdate).toHaveBeenCalled();
-  });
-
-  it("computes autonomy scores as average of enrichment autonomyScore", async () => {
-    mockSelect.mockReturnValueOnce(
-      chainableSelect([{ agentId: "agent-001", totalWeight: 10, interactionCount: 5 }])
-    );
-    mockSelect
-      .mockReturnValueOnce(chainableSelect([{ avgAutonomy: "0.72" }]))
-      .mockReturnValueOnce(chainableSelect([]))
-      .mockReturnValueOnce(chainableSelect([{ count: 0 }]));
-
-    await runAnalysis();
-
-    expect(mockUpdate).toHaveBeenCalled();
-    expect(mockSelect).toHaveBeenCalled();
-  });
-
-  it("computes activity scores based on actions in last 24h (capped at 1.0)", async () => {
-    mockSelect.mockReturnValueOnce(
-      chainableSelect([{ agentId: "agent-001", totalWeight: 10, interactionCount: 5 }])
-    );
-    mockSelect
-      .mockReturnValueOnce(chainableSelect([{ avgAutonomy: "0.5" }]))
-      .mockReturnValueOnce(chainableSelect([]))
-      .mockReturnValueOnce(chainableSelect([{ count: 30 }]));
-
-    await runAnalysis();
-
-    expect(mockUpdate).toHaveBeenCalled();
-  });
-
-  it('classifies agents as "content_creator" when posts > comments*2 and total > 50', async () => {
-    mockSelect.mockReturnValueOnce(
-      chainableSelect([{ agentId: "agent-001", totalWeight: 10, interactionCount: 5 }])
-    );
-    mockSelect
-      .mockReturnValueOnce(chainableSelect([{ avgAutonomy: "0.5" }]))
-      .mockReturnValueOnce(chainableSelect([
-        { actionType: "post", count: 40 },
-        { actionType: "comment", count: 15 },
-      ]))
-      .mockReturnValueOnce(chainableSelect([{ count: 5 }]));
-
-    await runAnalysis();
-
-    expect(mockUpdate).toHaveBeenCalled();
-  });
-
-  it('classifies agents as "commenter" when comments > posts*3 and total > 50', async () => {
-    mockSelect.mockReturnValueOnce(
-      chainableSelect([{ agentId: "agent-001", totalWeight: 10, interactionCount: 5 }])
-    );
-    mockSelect
-      .mockReturnValueOnce(chainableSelect([{ avgAutonomy: "0.5" }]))
-      .mockReturnValueOnce(chainableSelect([
-        { actionType: "post", count: 11 },
-        { actionType: "comment", count: 40 },
-      ]))
-      .mockReturnValueOnce(chainableSelect([{ count: 5 }]));
-
-    await runAnalysis();
-
-    expect(mockUpdate).toHaveBeenCalled();
-  });
-
-  it('classifies agents as "active" when total > 20', async () => {
-    mockSelect.mockReturnValueOnce(
-      chainableSelect([{ agentId: "agent-001", totalWeight: 10, interactionCount: 5 }])
-    );
-    mockSelect
-      .mockReturnValueOnce(chainableSelect([{ avgAutonomy: "0.5" }]))
-      .mockReturnValueOnce(chainableSelect([
-        { actionType: "post", count: 12 },
-        { actionType: "comment", count: 12 },
-      ]))
-      .mockReturnValueOnce(chainableSelect([{ count: 5 }]));
-
-    await runAnalysis();
-
-    expect(mockUpdate).toHaveBeenCalled();
-  });
-
-  it('classifies agents as "bot_farm" when autonomy < 0.2 and total > 30', async () => {
-    mockSelect.mockReturnValueOnce(
-      chainableSelect([{ agentId: "agent-001", totalWeight: 10, interactionCount: 5 }])
-    );
-    // Due to code ordering, "active" (total > 20) matches before "bot_farm" (total > 30)
-    mockSelect
-      .mockReturnValueOnce(chainableSelect([{ avgAutonomy: "0.1" }]))
-      .mockReturnValueOnce(chainableSelect([
-        { actionType: "post", count: 10 },
-        { actionType: "comment", count: 25 },
-      ]))
-      .mockReturnValueOnce(chainableSelect([{ count: 5 }]));
-
-    await runAnalysis();
-
-    expect(mockUpdate).toHaveBeenCalled();
-  });
-
-  it('classifies agents as "lurker" by default', async () => {
-    mockSelect.mockReturnValueOnce(
-      chainableSelect([{ agentId: "agent-001", totalWeight: 10, interactionCount: 5 }])
-    );
-    mockSelect
-      .mockReturnValueOnce(chainableSelect([{ avgAutonomy: "0.5" }]))
-      .mockReturnValueOnce(chainableSelect([
-        { actionType: "post", count: 3 },
-        { actionType: "comment", count: 2 },
-      ]))
-      .mockReturnValueOnce(chainableSelect([{ count: 1 }]));
-
-    await runAnalysis();
-
-    expect(mockUpdate).toHaveBeenCalled();
-  });
-
-  it("saves agent profile snapshots", async () => {
-    mockSelect.mockReturnValueOnce(
-      chainableSelect([{ agentId: "agent-001", totalWeight: 10, interactionCount: 5 }])
-    );
-    mockSelect
-      .mockReturnValueOnce(chainableSelect([{ avgAutonomy: "0.7" }]))
-      .mockReturnValueOnce(chainableSelect([{ actionType: "post", count: 5 }]))
-      .mockReturnValueOnce(chainableSelect([{ count: 3 }]));
-
-    await runAnalysis();
-
-    expect(mockInsert).toHaveBeenCalled();
-  });
-
-  it("updates topic velocity (actions per hour in last 24h)", async () => {
-    mockSelect.mockReturnValueOnce(chainableSelect([]));
-    mockTopicsFindMany.mockResolvedValue([mockDbTopic]);
-
-    mockSelect
-      .mockReturnValueOnce(chainableSelect([{ count: 48 }]))
-      .mockReturnValueOnce(chainableSelect([{ count: 8 }]))
-      .mockReturnValueOnce(chainableSelect([{ avg: 0.55 }]));
-
-    await runAnalysis();
-
-    expect(mockUpdate).toHaveBeenCalled();
-  });
-
-  it("updates topic agent count (distinct agents)", async () => {
-    mockSelect.mockReturnValueOnce(chainableSelect([]));
-    mockTopicsFindMany.mockResolvedValue([mockDbTopic]);
-
-    mockSelect
-      .mockReturnValueOnce(chainableSelect([{ count: 10 }]))
-      .mockReturnValueOnce(chainableSelect([{ count: 15 }]))
-      .mockReturnValueOnce(chainableSelect([{ avg: 0.3 }]));
-
-    await runAnalysis();
-
-    expect(mockUpdate).toHaveBeenCalled();
-  });
-
-  it("returns counts of agentsUpdated and topicsUpdated", async () => {
-    mockSelect.mockReturnValueOnce(
-      chainableSelect([{ agentId: "agent-001", totalWeight: 10, interactionCount: 5 }])
-    );
-    mockSelect
-      .mockReturnValueOnce(chainableSelect([{ avgAutonomy: "0.5" }]))
-      .mockReturnValueOnce(chainableSelect([]))
-      .mockReturnValueOnce(chainableSelect([{ count: 0 }]));
-
-    mockTopicsFindMany.mockResolvedValue([mockDbTopic]);
-    mockSelect
-      .mockReturnValueOnce(chainableSelect([{ count: 5 }]))
-      .mockReturnValueOnce(chainableSelect([{ count: 3 }]))
-      .mockReturnValueOnce(chainableSelect([{ avg: 0.4 }]));
-
-    const result = await runAnalysis();
-
-    expect(result.agentsUpdated).toBe(2);
+    expect(result.agentsUpdated).toBe(1);
     expect(result.topicsUpdated).toBe(1);
+    expect(mockInsert).toHaveBeenCalled(); // agent profile snapshot insert
+    expect(mockSetStageCursor).toHaveBeenCalledOnce();
+    expect(mockSetStageCursor.mock.calls[0][3]).toMatchObject({
+      changedAgents: 1,
+      changedTopics: 1,
+      agentsUpdated: 1,
+      topicsUpdated: 1,
+    });
+
+    vi.useRealTimers();
   });
 
-  it("handles empty interaction data (no agents to update)", async () => {
-    mockSelect.mockReturnValueOnce(chainableSelect([]));
+  it("does not advance cursor when analysis throws", async () => {
+    mockExecute
+      .mockResolvedValueOnce([{ agent_id: "agent-1" }])
+      .mockResolvedValueOnce([])
+      .mockRejectedValueOnce(new Error("boom"));
 
-    const result = await runAnalysis();
+    queueSelectResult([]);
+    queueSelectResult([]);
 
-    expect(result.agentsUpdated).toBe(0);
-    expect(result.topicsUpdated).toBe(0);
-  });
-
-  it("handles empty topic list", async () => {
-    mockSelect.mockReturnValueOnce(chainableSelect([]));
-    mockTopicsFindMany.mockResolvedValue([]);
-
-    const result = await runAnalysis();
-
-    expect(result.topicsUpdated).toBe(0);
+    await expect(runAnalysis()).rejects.toThrow("boom");
+    expect(mockSetStageCursor).not.toHaveBeenCalled();
   });
 });

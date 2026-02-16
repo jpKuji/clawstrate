@@ -27,6 +27,26 @@ const schedules = [
     name: "clawstrate-pipeline",
   },
   {
+    destination: `${BASE_URL}/api/cron/analyze`,
+    cron: "5 */2 * * *",
+    name: "clawstrate-analyze",
+  },
+  {
+    destination: `${BASE_URL}/api/cron/aggregate`,
+    cron: "15 */2 * * *",
+    name: "clawstrate-aggregate",
+  },
+  {
+    destination: `${BASE_URL}/api/cron/coordination`,
+    cron: "25 */2 * * *",
+    name: "clawstrate-coordination",
+  },
+  {
+    destination: `${BASE_URL}/api/cron/briefing`,
+    cron: "0 */6 * * *",
+    name: "clawstrate-briefing",
+  },
+  {
     destination: `${BASE_URL}/api/cron/briefing-weekly`,
     cron: "0 9 * * 1",
     name: "clawstrate-briefing-weekly",

@@ -1,17 +1,21 @@
 import { db } from "../db";
 import {
-  actions,
-  agents,
   interactions,
-  actionTopics,
-  topics,
   coordinationSignals,
 } from "../db/schema";
-import { eq, and, gte, inArray, count } from "drizzle-orm";
+import { gte, sql } from "drizzle-orm";
 import { subDays, subHours } from "date-fns";
 import { createHash } from "crypto";
+import {
+  getBootstrapStart,
+  getStageCursor,
+  GLOBAL_CURSOR_SCOPE,
+  setStageCursor,
+} from "./cursors";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+const MAX_CANDIDATES_PER_AGENT = 40;
+const MAX_GROUP_SIZE = 16;
 
 function stableHash(payload: Record<string, unknown>): string {
   return createHash("sha256").update(JSON.stringify(payload)).digest("hex");
@@ -35,36 +39,96 @@ function twoHourBucket(date: Date): Date {
   return d;
 }
 
+function extractRows<T>(result: unknown): T[] {
+  if (Array.isArray(result)) return result as T[];
+  if (result && typeof result === "object" && "rows" in (result as Record<string, unknown>)) {
+    const rows = (result as { rows?: unknown }).rows;
+    return Array.isArray(rows) ? (rows as T[]) : [];
+  }
+  return [];
+}
+
+function toNumber(value: unknown, fallback = 0): number {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function chunk<T>(items: T[], size: number): T[][] {
+  if (items.length === 0) return [];
+  const chunks: T[][] = [];
+  for (let i = 0; i < items.length; i += size) {
+    chunks.push(items.slice(i, i + size));
+  }
+  return chunks;
+}
+
+async function bulkInsertSignals(
+  rows: Array<{
+    signalType: "temporal_cluster" | "content_similarity" | "reply_clique";
+    signalHash: string;
+    windowStart: Date;
+    windowEnd: Date;
+    confidence: number;
+    agentIds: string[];
+    evidence: string;
+  }>
+): Promise<number> {
+  let inserted = 0;
+  for (const valueChunk of chunk(rows, 500)) {
+    if (valueChunk.length === 0) continue;
+    const result = await db
+      .insert(coordinationSignals)
+      .values(valueChunk)
+      .onConflictDoNothing({
+        target: [
+          coordinationSignals.signalType,
+          coordinationSignals.signalHash,
+          coordinationSignals.windowStart,
+        ],
+      })
+      .returning({ id: coordinationSignals.id });
+    inserted += result.length;
+  }
+  return inserted;
+}
+
 /**
  * Detect coordination patterns among agents.
- * Call after analyze pipeline completes.
  */
 export async function detectCoordination(): Promise<{
   signalsDetected: number;
   errors: string[];
 }> {
+  const now = new Date();
+  const cursor = await getStageCursor("coordination", GLOBAL_CURSOR_SCOPE);
+  const cursorStart = cursor?.cursorTs ?? getBootstrapStart("coordination", now);
+
   const errors: string[] = [];
   let signalsDetected = 0;
 
   try {
-    const temporalSignals = await detectTemporalClustering();
-    signalsDetected += temporalSignals;
+    signalsDetected += await detectTemporalClustering(cursorStart, now);
   } catch (e: any) {
     errors.push(`temporal clustering: ${e.message}`);
   }
 
   try {
-    const similaritySignals = await detectContentSimilarity();
-    signalsDetected += similaritySignals;
+    signalsDetected += await detectContentSimilarity(now);
   } catch (e: any) {
     errors.push(`content similarity: ${e.message}`);
   }
 
   try {
-    const cliqueSignals = await detectReplyCliques();
-    signalsDetected += cliqueSignals;
+    signalsDetected += await detectReplyCliques(now);
   } catch (e: any) {
     errors.push(`reply cliques: ${e.message}`);
+  }
+
+  if (errors.length === 0) {
+    await setStageCursor("coordination", GLOBAL_CURSOR_SCOPE, now, {
+      cursorStart: cursorStart.toISOString(),
+      signalsDetected,
+    });
   }
 
   return { signalsDetected, errors };
@@ -74,194 +138,208 @@ export async function detectCoordination(): Promise<{
  * Method 1: Temporal clustering
  * Detect 3+ unconnected agents posting on the same topic within a 2h window.
  */
-async function detectTemporalClustering(): Promise<number> {
-  const last24h = subHours(new Date(), 24);
-  let signalsFound = 0;
+async function detectTemporalClustering(cursorStart: Date, now: Date): Promise<number> {
+  const last24h = subHours(now, 24);
+  const scanStart = cursorStart > last24h ? cursorStart : last24h;
 
-  // Get all topics with actions in the last 24h
-  const recentTopicActions = await db
-    .select({
-      topicId: actionTopics.topicId,
-      topicSlug: topics.slug,
-      agentId: actions.agentId,
-      performedAt: actions.performedAt,
-    })
-    .from(actionTopics)
-    .innerJoin(actions, eq(actionTopics.actionId, actions.id))
-    .innerJoin(topics, eq(actionTopics.topicId, topics.id))
-    .where(gte(actions.performedAt, last24h))
-    .orderBy(actionTopics.topicId, actions.performedAt);
+  const candidatesResult = await db.execute<{
+    topic_id: string;
+    topic_slug: string;
+    bucket_start: Date;
+    agent_ids: string[];
+  }>(sql`
+    SELECT
+      at.topic_id,
+      t.slug AS topic_slug,
+      (
+        DATE_TRUNC('hour', a.performed_at)
+        - ((EXTRACT(HOUR FROM a.performed_at)::int % 2) * INTERVAL '1 hour')
+      )::timestamp AS bucket_start,
+      ARRAY_AGG(DISTINCT a.agent_id) FILTER (WHERE a.agent_id IS NOT NULL) AS agent_ids
+    FROM action_topics at
+    INNER JOIN actions a ON a.id = at.action_id
+    INNER JOIN topics t ON t.id = at.topic_id
+    WHERE a.performed_at >= ${scanStart}
+      AND a.performed_at < ${now}
+      AND a.agent_id IS NOT NULL
+    GROUP BY at.topic_id, t.slug, bucket_start
+    HAVING COUNT(DISTINCT a.agent_id) >= 3
+  `);
 
-  // Group by topic
-  const byTopic = new Map<
-    string,
-    Array<{ agentId: string | null; performedAt: Date; topicSlug: string }>
-  >();
-  for (const row of recentTopicActions) {
-    if (!byTopic.has(row.topicId)) byTopic.set(row.topicId, []);
-    byTopic.get(row.topicId)!.push(row);
-  }
+  const candidates = extractRows<{
+    topic_id: string;
+    topic_slug: string;
+    bucket_start: Date;
+    agent_ids: string[];
+  }>(candidatesResult);
 
-  for (const [topicId, topicActions] of byTopic) {
-    // Sliding 2-hour window
-    for (let i = 0; i < topicActions.length; i++) {
-      const windowStart = new Date(topicActions[i].performedAt).getTime();
-      const windowEnd = windowStart + 2 * 60 * 60 * 1000;
+  if (candidates.length === 0) return 0;
 
-      const agentsInWindow = new Set<string>();
-      for (let j = i; j < topicActions.length; j++) {
-        const t = new Date(topicActions[j].performedAt).getTime();
-        if (t > windowEnd) break;
-        if (topicActions[j].agentId)
-          agentsInWindow.add(topicActions[j].agentId!);
-      }
+  const relevantAgentIds = Array.from(
+    new Set(candidates.flatMap((candidate) => candidate.agent_ids || []))
+  );
 
-      if (agentsInWindow.size >= 3) {
-        const agentIds = Array.from(agentsInWindow);
-
-        // Check if these agents are mostly unconnected (not already interacting)
-        const mutualInteractions = await db
-          .select({ count: count(interactions.id) })
+  const interactionRows =
+    relevantAgentIds.length > 0
+      ? await db
+          .select({
+            sourceAgentId: interactions.sourceAgentId,
+            targetAgentId: interactions.targetAgentId,
+          })
           .from(interactions)
           .where(
-            and(
-              inArray(interactions.sourceAgentId, agentIds),
-              inArray(interactions.targetAgentId, agentIds)
-            )
-          );
+            sql`${interactions.sourceAgentId} = ANY(${relevantAgentIds}::uuid[]) AND ${interactions.targetAgentId} = ANY(${relevantAgentIds}::uuid[])`
+          )
+      : [];
 
-        const interactionCount = Number(mutualInteractions[0]?.count) || 0;
-        const maxPossible = agentIds.length * (agentIds.length - 1);
+  const directedPairs = new Set<string>();
+  for (const row of interactionRows) {
+    directedPairs.add(`${row.sourceAgentId}:${row.targetAgentId}`);
+  }
 
-        // If low interaction density, this is suspicious
-        if (maxPossible > 0 && interactionCount / maxPossible < 0.3) {
-          const confidence = Math.min(
-            0.5 + (agentsInWindow.size - 3) * 0.1,
-            0.95
-          );
-          const sortedAgentIds = [...agentIds].sort();
-          const bucketStart = twoHourBucket(new Date(windowStart));
-          const bucketEnd = new Date(bucketStart.getTime() + 2 * 60 * 60 * 1000);
-          const signalHash = stableHash({
-            topicId,
-            agents: sortedAgentIds,
-          });
+  const newSignals: Array<{
+    signalType: "temporal_cluster";
+    signalHash: string;
+    windowStart: Date;
+    windowEnd: Date;
+    confidence: number;
+    agentIds: string[];
+    evidence: string;
+  }> = [];
 
-          const inserted = await db
-            .insert(coordinationSignals)
-            .values({
-              signalType: "temporal_cluster",
-              signalHash,
-              windowStart: bucketStart,
-              windowEnd: bucketEnd,
-              confidence,
-              agentIds: sortedAgentIds,
-              evidence: `${agentIds.length} unconnected agents posted about "${topicActions[i].topicSlug}" within 2h window. Only ${interactionCount}/${maxPossible} possible interactions exist.`,
-            })
-            .onConflictDoNothing({
-              target: [
-                coordinationSignals.signalType,
-                coordinationSignals.signalHash,
-                coordinationSignals.windowStart,
-              ],
-            })
-            .returning({ id: coordinationSignals.id });
-          if (inserted.length > 0) signalsFound++;
+  for (const candidate of candidates) {
+    const agentIds = Array.from(new Set(candidate.agent_ids || [])).sort();
+    if (agentIds.length < 3) continue;
+
+    let interactionCount = 0;
+    for (const source of agentIds) {
+      for (const target of agentIds) {
+        if (source === target) continue;
+        if (directedPairs.has(`${source}:${target}`)) {
+          interactionCount += 1;
         }
       }
     }
+
+    const maxPossible = agentIds.length * (agentIds.length - 1);
+    if (maxPossible <= 0) continue;
+
+    const density = interactionCount / maxPossible;
+    if (density >= 0.3) continue;
+
+    const bucketStart = twoHourBucket(new Date(candidate.bucket_start));
+    const bucketEnd = new Date(bucketStart.getTime() + 2 * 60 * 60 * 1000);
+    const confidence = Math.min(0.5 + (agentIds.length - 3) * 0.1, 0.95);
+
+    newSignals.push({
+      signalType: "temporal_cluster",
+      signalHash: stableHash({
+        topicId: candidate.topic_id,
+        bucketStart: bucketStart.toISOString(),
+        agents: agentIds,
+      }),
+      windowStart: bucketStart,
+      windowEnd: bucketEnd,
+      confidence,
+      agentIds,
+      evidence: `${agentIds.length} weakly connected agents posted about "${candidate.topic_slug}" within one 2h bucket (${interactionCount}/${maxPossible} directed links).`,
+    });
   }
 
-  return signalsFound;
+  return bulkInsertSignals(newSignals);
 }
 
 /**
  * Method 2: Content similarity
  * Jaccard similarity > 0.8 on topic vectors over 7 days.
  */
-async function detectContentSimilarity(): Promise<number> {
-  const now = new Date();
+async function detectContentSimilarity(now: Date): Promise<number> {
   const windowStart = rollingUtcWindowStart(now, 7);
   const windowEnd = new Date(windowStart.getTime() + 7 * DAY_MS);
-  let signalsFound = 0;
 
-  // Build topic vector per agent (which topics they post about)
-  const agentTopics = await db
-    .select({
-      agentId: actions.agentId,
-      topicId: actionTopics.topicId,
-    })
-    .from(actionTopics)
-    .innerJoin(actions, eq(actionTopics.actionId, actions.id))
-    .where(gte(actions.performedAt, windowStart));
+  const pairsResult = await db.execute<{
+    agent_id_1: string;
+    agent_id_2: string;
+    intersection_count: number;
+    union_count: number;
+    similarity: number;
+  }>(sql`
+    WITH agent_topics AS (
+      SELECT DISTINCT a.agent_id, at.topic_id
+      FROM action_topics at
+      INNER JOIN actions a ON a.id = at.action_id
+      WHERE a.agent_id IS NOT NULL
+        AND a.performed_at >= ${windowStart}
+        AND a.performed_at < ${windowEnd}
+    ),
+    topic_counts AS (
+      SELECT agent_id, COUNT(*)::int AS topic_count
+      FROM agent_topics
+      GROUP BY agent_id
+      HAVING COUNT(*) >= 3
+    ),
+    intersections AS (
+      SELECT
+        at1.agent_id AS agent_id_1,
+        at2.agent_id AS agent_id_2,
+        COUNT(*)::int AS intersection_count
+      FROM agent_topics at1
+      INNER JOIN agent_topics at2
+        ON at1.topic_id = at2.topic_id
+       AND at1.agent_id < at2.agent_id
+      GROUP BY at1.agent_id, at2.agent_id
+    )
+    SELECT
+      i.agent_id_1,
+      i.agent_id_2,
+      i.intersection_count,
+      (tc1.topic_count + tc2.topic_count - i.intersection_count)::int AS union_count,
+      (i.intersection_count::real / NULLIF((tc1.topic_count + tc2.topic_count - i.intersection_count), 0)::real) AS similarity
+    FROM intersections i
+    INNER JOIN topic_counts tc1 ON tc1.agent_id = i.agent_id_1
+    INNER JOIN topic_counts tc2 ON tc2.agent_id = i.agent_id_2
+    WHERE (i.intersection_count::real / NULLIF((tc1.topic_count + tc2.topic_count - i.intersection_count), 0)::real) > 0.8
+  `);
 
-  const topicVectors = new Map<string, Set<string>>();
-  for (const row of agentTopics) {
-    if (!row.agentId) continue;
-    if (!topicVectors.has(row.agentId))
-      topicVectors.set(row.agentId, new Set());
-    topicVectors.get(row.agentId)!.add(row.topicId);
-  }
+  const pairs = extractRows<{
+    agent_id_1: string;
+    agent_id_2: string;
+    intersection_count: number;
+    union_count: number;
+    similarity: number;
+  }>(pairsResult);
 
-  // Compare all pairs (only agents with 3+ topics to avoid noise)
-  const agentIds = Array.from(topicVectors.entries())
-    .filter(([, topicSet]) => topicSet.size >= 3)
-    .map(([id]) => id);
+  const signals = pairs.map((row) => {
+    const sortedAgentIds = [row.agent_id_1, row.agent_id_2].sort();
+    const similarity = toNumber(row.similarity, 0);
+    const intersection = toNumber(row.intersection_count, 0);
+    const union = toNumber(row.union_count, 0);
+    return {
+      signalType: "content_similarity" as const,
+      signalHash: stableHash({
+        agents: sortedAgentIds,
+        intersection,
+        union,
+      }),
+      windowStart,
+      windowEnd,
+      confidence: similarity,
+      agentIds: sortedAgentIds,
+      evidence: `Jaccard topic similarity ${similarity.toFixed(2)} over 7-day window (${intersection}/${union}).`,
+    };
+  });
 
-  for (let i = 0; i < agentIds.length; i++) {
-    for (let j = i + 1; j < agentIds.length; j++) {
-      const setA = topicVectors.get(agentIds[i])!;
-      const setB = topicVectors.get(agentIds[j])!;
-
-      // Jaccard similarity
-      const intersection = new Set([...setA].filter((x) => setB.has(x)));
-      const union = new Set([...setA, ...setB]);
-      const similarity = intersection.size / union.size;
-
-      if (similarity > 0.8) {
-        const sortedAgentIds = [agentIds[i], agentIds[j]].sort();
-        const signalHash = stableHash({
-          agents: sortedAgentIds,
-          sharedTopicCount: intersection.size,
-        });
-        const inserted = await db
-          .insert(coordinationSignals)
-          .values({
-            signalType: "content_similarity",
-            signalHash,
-            windowStart,
-            windowEnd,
-            confidence: similarity,
-            agentIds: sortedAgentIds,
-            evidence: `Jaccard topic similarity of ${similarity.toFixed(2)} over 7 days. ${intersection.size} shared topics out of ${union.size} total.`,
-          })
-          .onConflictDoNothing({
-            target: [
-              coordinationSignals.signalType,
-              coordinationSignals.signalHash,
-              coordinationSignals.windowStart,
-            ],
-          })
-          .returning({ id: coordinationSignals.id });
-        if (inserted.length > 0) signalsFound++;
-      }
-    }
-  }
-
-  return signalsFound;
+  return bulkInsertSignals(signals);
 }
 
 /**
  * Method 3: Reply clique detection
  * Groups where > 80% of interactions are within the group.
  */
-async function detectReplyCliques(): Promise<number> {
-  const now = new Date();
+async function detectReplyCliques(now: Date): Promise<number> {
   const windowStart = rollingUtcWindowStart(now, 7);
   const windowEnd = new Date(windowStart.getTime() + 7 * DAY_MS);
-  let signalsFound = 0;
 
-  // Get all recent interactions
   const recentInteractions = await db
     .select({
       sourceAgentId: interactions.sourceAgentId,
@@ -270,91 +348,76 @@ async function detectReplyCliques(): Promise<number> {
     .from(interactions)
     .where(gte(interactions.createdAt, windowStart));
 
-  // Build adjacency map
   const adjacency = new Map<string, Set<string>>();
   for (const inter of recentInteractions) {
-    if (!adjacency.has(inter.sourceAgentId))
-      adjacency.set(inter.sourceAgentId, new Set());
+    if (!adjacency.has(inter.sourceAgentId)) adjacency.set(inter.sourceAgentId, new Set());
     adjacency.get(inter.sourceAgentId)!.add(inter.targetAgentId);
   }
 
-  // Find potential cliques using a simplified approach:
-  // For each agent, check if their interaction partners form a tight group
-  const allAgentIds = Array.from(adjacency.keys()).sort();
   const checkedGroups = new Set<string>();
+  const signals: Array<{
+    signalType: "reply_clique";
+    signalHash: string;
+    windowStart: Date;
+    windowEnd: Date;
+    confidence: number;
+    agentIds: string[];
+    evidence: string;
+  }> = [];
 
+  const allAgentIds = Array.from(adjacency.keys()).sort();
   for (const agentId of allAgentIds) {
-    const partners = adjacency.get(agentId);
-    if (!partners || partners.size < 2) continue;
+    const partners = Array.from(adjacency.get(agentId) || []).sort();
+    if (partners.length < 2) continue;
 
-    // Form candidate group: agent + all partners
-    const group = new Set([agentId, ...partners]);
-    if (group.size < 3) continue;
+    const boundedPartners = partners.slice(0, MAX_CANDIDATES_PER_AGENT);
+    const group = Array.from(new Set([agentId, ...boundedPartners])).slice(0, MAX_GROUP_SIZE);
+    if (group.length < 3) continue;
 
-    // Create deterministic key to avoid checking same group twice
-    const groupKey = Array.from(group).sort().join(",");
+    const groupKey = [...group].sort().join(",");
     if (checkedGroups.has(groupKey)) continue;
     checkedGroups.add(groupKey);
 
-    const groupArray = Array.from(group);
-
-    // Count internal vs total interactions for the group
+    const groupSet = new Set(group);
     let internalCount = 0;
     let totalCount = 0;
 
-    for (const memberId of groupArray) {
-      const memberPartners = adjacency.get(memberId);
+    for (const member of group) {
+      const memberPartners = adjacency.get(member);
       if (!memberPartners) continue;
-
       for (const partner of memberPartners) {
-        totalCount++;
-        if (group.has(partner)) internalCount++;
+        totalCount += 1;
+        if (groupSet.has(partner)) internalCount += 1;
       }
     }
 
-    if (totalCount > 0 && internalCount / totalCount > 0.8) {
-      const confidence = Math.min(
-        0.6 + (internalCount / totalCount - 0.8) * 2,
-        0.95
-      );
-      const sortedAgentIds = [...groupArray].sort();
-      const signalHash = stableHash({
+    if (totalCount === 0) continue;
+    const ratio = internalCount / totalCount;
+    if (ratio <= 0.8) continue;
+
+    const confidence = Math.min(0.6 + (ratio - 0.8) * 2, 0.95);
+    const sortedAgentIds = [...group].sort();
+
+    signals.push({
+      signalType: "reply_clique",
+      signalHash: stableHash({
         agents: sortedAgentIds,
         internalCount,
         totalCount,
-      });
-
-      const inserted = await db
-        .insert(coordinationSignals)
-        .values({
-          signalType: "reply_clique",
-          signalHash,
-          windowStart,
-          windowEnd,
-          confidence,
-          agentIds: sortedAgentIds,
-          evidence: `${groupArray.length}-agent clique with ${((internalCount / totalCount) * 100).toFixed(0)}% internal interactions (${internalCount}/${totalCount}).`,
-        })
-        .onConflictDoNothing({
-          target: [
-            coordinationSignals.signalType,
-            coordinationSignals.signalHash,
-            coordinationSignals.windowStart,
-          ],
-        })
-        .returning({ id: coordinationSignals.id });
-      if (inserted.length > 0) signalsFound++;
-    }
+      }),
+      windowStart,
+      windowEnd,
+      confidence,
+      agentIds: sortedAgentIds,
+      evidence: `${sortedAgentIds.length}-agent clique with ${(ratio * 100).toFixed(0)}% internal interactions (${internalCount}/${totalCount}).`,
+    });
   }
 
-  return signalsFound;
+  return bulkInsertSignals(signals);
 }
 
 /**
  * Label propagation community detection on the interaction graph.
- * Each agent starts with a unique label. At each iteration, each agent
- * adopts the most common label among its neighbors (weighted by interaction strength).
- * Converges when labels stabilize.
  */
 export async function detectCommunities(): Promise<{
   communitiesFound: number;
@@ -362,7 +425,6 @@ export async function detectCommunities(): Promise<{
 }> {
   const last14d = subDays(new Date(), 14);
 
-  // Get all interactions in the last 14 days
   const allInteractions = await db
     .select({
       sourceAgentId: interactions.sourceAgentId,
@@ -372,7 +434,6 @@ export async function detectCommunities(): Promise<{
     .from(interactions)
     .where(gte(interactions.createdAt, last14d));
 
-  // Build undirected weighted adjacency list
   const adjacency = new Map<string, Map<string, number>>();
   const allAgentIds = new Set<string>();
 
@@ -388,7 +449,6 @@ export async function detectCommunities(): Promise<{
     allAgentIds.add(inter.sourceAgentId);
     allAgentIds.add(inter.targetAgentId);
 
-    // Add edge in both directions (undirected)
     for (const [a, b] of [
       [inter.sourceAgentId, inter.targetAgentId],
       [inter.targetAgentId, inter.sourceAgentId],
@@ -403,12 +463,10 @@ export async function detectCommunities(): Promise<{
     return { communitiesFound: 0, agentsLabeled: 0 };
   }
 
-  // Initialize: each agent gets a unique label (0, 1, 2, ...)
   const agentArray = Array.from(allAgentIds).sort();
   const labels = new Map<string, number>();
   agentArray.forEach((id, i) => labels.set(id, i));
 
-  // Run label propagation (max 20 iterations)
   const MAX_ITERATIONS = 20;
   for (let iter = 0; iter < MAX_ITERATIONS; iter++) {
     let changed = false;
@@ -417,17 +475,12 @@ export async function detectCommunities(): Promise<{
       const neighbors = adjacency.get(agentId);
       if (!neighbors || neighbors.size === 0) continue;
 
-      // Count weighted votes for each label
       const labelVotes = new Map<number, number>();
       for (const [neighborId, weight] of neighbors) {
         const neighborLabel = labels.get(neighborId)!;
-        labelVotes.set(
-          neighborLabel,
-          (labelVotes.get(neighborLabel) || 0) + weight
-        );
+        labelVotes.set(neighborLabel, (labelVotes.get(neighborLabel) || 0) + weight);
       }
 
-      // Adopt the label with the most weighted votes
       let bestLabel = labels.get(agentId)!;
       let bestVotes = Number.NEGATIVE_INFINITY;
       for (const [label, votes] of labelVotes) {
@@ -443,27 +496,36 @@ export async function detectCommunities(): Promise<{
       }
     }
 
-    if (!changed) break; // Converged
+    if (!changed) break;
   }
 
-  // Normalize labels to sequential numbers
   const uniqueLabels = [...new Set(labels.values())].sort((a, b) => a - b);
   const labelMap = new Map<number, number>();
   uniqueLabels.forEach((label, i) => labelMap.set(label, i));
 
-  // Update agents with community labels
-  let agentsLabeled = 0;
-  for (const [agentId, label] of labels) {
-    const normalizedLabel = labelMap.get(label)!;
-    await db
-      .update(agents)
-      .set({ communityLabel: normalizedLabel })
-      .where(eq(agents.id, agentId));
-    agentsLabeled++;
+  const updateRows = Array.from(labels.entries()).map(([agentId, label]) => ({
+    agentId,
+    communityLabel: labelMap.get(label)!,
+  }));
+
+  for (const rowChunk of chunk(updateRows, 500)) {
+    const values = sql.join(
+      rowChunk.map((row) => sql`(${row.agentId}::uuid, ${row.communityLabel}::int)`),
+      sql`,`
+    );
+
+    await db.execute(sql`
+      UPDATE agents AS a
+      SET community_label = v.community_label
+      FROM (
+        VALUES ${values}
+      ) AS v(id, community_label)
+      WHERE a.id = v.id
+    `);
   }
 
   return {
     communitiesFound: uniqueLabels.length,
-    agentsLabeled,
+    agentsLabeled: updateRows.length,
   };
 }

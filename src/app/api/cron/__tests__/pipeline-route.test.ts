@@ -4,6 +4,9 @@ import { NextRequest } from "next/server";
 let mockDb: {
   insert: ReturnType<typeof vi.fn>;
   update: ReturnType<typeof vi.fn>;
+  query: {
+    pipelineStageRuns: { findFirst: ReturnType<typeof vi.fn> };
+  };
 };
 
 vi.mock("@/lib/db", () => ({
@@ -12,28 +15,21 @@ vi.mock("@/lib/db", () => ({
   },
 }));
 
-vi.mock("@/lib/pipeline/ingest", () => ({
-  runIngestion: vi.fn(),
-}));
-vi.mock("@/lib/pipeline/enrich", () => ({
-  runEnrichment: vi.fn(),
-}));
-vi.mock("@/lib/pipeline/analyze", () => ({
-  runAnalysis: vi.fn(),
-}));
-vi.mock("@/lib/pipeline/aggregate", () => ({
-  runAggregation: vi.fn(),
-}));
+vi.mock("@/lib/pipeline/ingest", () => ({ runIngestion: vi.fn() }));
+vi.mock("@/lib/pipeline/enrich", () => ({ runEnrichment: vi.fn() }));
+vi.mock("@/lib/pipeline/analyze", () => ({ runAnalysis: vi.fn() }));
+vi.mock("@/lib/pipeline/aggregate", () => ({ runAggregation: vi.fn() }));
 vi.mock("@/lib/pipeline/coordination", () => ({
   detectCoordination: vi.fn(),
   detectCommunities: vi.fn(),
 }));
-vi.mock("@/lib/pipeline/briefing", () => ({
-  generateBriefing: vi.fn(),
-}));
+vi.mock("@/lib/pipeline/briefing", () => ({ generateBriefing: vi.fn() }));
 vi.mock("@/lib/redis", () => ({
   acquireLock: vi.fn(),
   invalidateApiCaches: vi.fn().mockResolvedValue(undefined),
+}));
+vi.mock("@/lib/pipeline/split", () => ({
+  isSplitPipelineEnabled: vi.fn().mockReturnValue(false),
 }));
 
 import { GET } from "@/app/api/cron/pipeline/route";
@@ -44,6 +40,7 @@ import { runAggregation } from "@/lib/pipeline/aggregate";
 import { detectCoordination, detectCommunities } from "@/lib/pipeline/coordination";
 import { generateBriefing } from "@/lib/pipeline/briefing";
 import { acquireLock } from "@/lib/redis";
+import { isSplitPipelineEnabled } from "@/lib/pipeline/split";
 
 function createInsertChain(terminal: unknown) {
   const chain: any = {};
@@ -63,9 +60,7 @@ function createUpdateChain() {
 
 function makeRequest(path: string, authHeader?: string): NextRequest {
   const headers: Record<string, string> = {};
-  if (authHeader !== undefined) {
-    headers.authorization = authHeader;
-  }
+  if (authHeader !== undefined) headers.authorization = authHeader;
   return new NextRequest(`http://localhost${path}`, { headers });
 }
 
@@ -85,9 +80,15 @@ describe("GET /api/cron/pipeline", () => {
         return createInsertChain([{ id: `stage-${insertCalls}`, durationMs: 0 }]);
       }),
       update: vi.fn(() => createUpdateChain()),
+      query: {
+        pipelineStageRuns: {
+          findFirst: vi.fn().mockResolvedValue(null),
+        },
+      },
     };
 
     vi.mocked(acquireLock).mockResolvedValue(mockRelease);
+    vi.mocked(isSplitPipelineEnabled).mockReturnValue(false);
     vi.mocked(runIngestion).mockResolvedValue({ postsIngested: 1, commentsIngested: 1, errors: [] });
     vi.mocked(runEnrichment).mockResolvedValue({ enriched: 1, errors: [] });
     vi.mocked(runAnalysis).mockResolvedValue({ agentsUpdated: 1, topicsUpdated: 1 });
@@ -121,11 +122,11 @@ describe("GET /api/cron/pipeline", () => {
     expect(runAggregation).not.toHaveBeenCalled();
     expect(detectCoordination).not.toHaveBeenCalled();
     expect(generateBriefing).not.toHaveBeenCalled();
-    expect(acquireLock).toHaveBeenCalledWith("pipeline", 900);
+    expect(acquireLock).toHaveBeenCalledWith("pipeline", 330);
     expect(mockRelease).toHaveBeenCalledOnce();
   });
 
-  it("runs all stages when no stage fails", async () => {
+  it("runs all stages in legacy mode when no stage fails", async () => {
     const req = makeRequest("/api/cron/pipeline", `Bearer ${process.env.CRON_SECRET}`);
     const res = await GET(req);
     const body = await res.json();
@@ -141,5 +142,35 @@ describe("GET /api/cron/pipeline", () => {
     expect(detectCommunities).toHaveBeenCalledOnce();
     expect(generateBriefing).toHaveBeenCalledOnce();
     expect(mockRelease).toHaveBeenCalledOnce();
+  });
+
+  it("delegates heavy stages when split mode is enabled", async () => {
+    vi.mocked(isSplitPipelineEnabled).mockReturnValue(true);
+
+    const req = makeRequest("/api/cron/pipeline", `Bearer ${process.env.CRON_SECRET}`);
+    const res = await GET(req);
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.status).toBe("completed");
+
+    const stageByName = Object.fromEntries(
+      (body.stages as Array<{ stage: string; status: string; result?: { reason?: string } }>).map(
+        (stage) => [stage.stage, stage]
+      )
+    );
+
+    expect(stageByName.ingest.status).toBe("completed");
+    expect(stageByName.enrich.status).toBe("completed");
+    expect(stageByName.analyze.status).toBe("skipped");
+    expect(stageByName.analyze.result?.reason).toBe("delegated_to_split_schedule");
+    expect(stageByName.aggregate.status).toBe("skipped");
+    expect(stageByName.coordination.status).toBe("skipped");
+    expect(stageByName.briefing.status).toBe("skipped");
+
+    expect(runAnalysis).not.toHaveBeenCalled();
+    expect(runAggregation).not.toHaveBeenCalled();
+    expect(detectCoordination).not.toHaveBeenCalled();
+    expect(generateBriefing).not.toHaveBeenCalled();
   });
 });

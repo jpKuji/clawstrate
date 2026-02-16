@@ -3,15 +3,18 @@ import {
   agents,
   agentIdentities,
   actions,
-  enrichments,
   interactions,
   agentProfiles,
-  topics,
-  actionTopics,
   dailyAgentStats,
 } from "../db/schema";
-import { eq, desc, gte, lte, sql, count, avg, and, inArray } from "drizzle-orm";
+import { gte, sql, inArray } from "drizzle-orm";
 import { subHours, subDays } from "date-fns";
+import {
+  getBootstrapStart,
+  getStageCursor,
+  GLOBAL_CURSOR_SCOPE,
+  setStageCursor,
+} from "./cursors";
 
 export interface MarketplaceCategorySpread {
   category: string;
@@ -36,6 +39,20 @@ function extractRows<T>(result: unknown): T[] {
     return Array.isArray(rows) ? (rows as T[]) : [];
   }
   return [];
+}
+
+function toNumber(value: unknown, fallback = 0): number {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function chunk<T>(items: T[], size: number): T[][] {
+  if (items.length === 0) return [];
+  const chunks: T[][] = [];
+  for (let i = 0; i < items.length; i += size) {
+    chunks.push(items.slice(i, i + size));
+  }
+  return chunks;
 }
 
 export async function computeMarketplaceAgentMetrics(
@@ -144,8 +161,101 @@ export async function computeMarketplaceAgentMetrics(
   };
 }
 
+interface AgentUpdateRow {
+  agentId: string;
+  influenceScore: number;
+  autonomyScore: number;
+  activityScore: number;
+  agentType: string;
+  postingRegularity: number | null;
+  peakHourUtc: number | null;
+  burstCount7d: number;
+  postCount: number;
+  commentCount: number;
+}
+
+async function bulkUpdateAgents(rows: AgentUpdateRow[]): Promise<void> {
+  for (const group of chunk(rows, 500)) {
+    const values = sql.join(
+      group.map((row) => sql`
+        (
+          ${row.agentId}::uuid,
+          ${row.influenceScore}::real,
+          ${row.autonomyScore}::real,
+          ${row.activityScore}::real,
+          ${row.agentType}::text,
+          ${row.postingRegularity}::real,
+          ${row.peakHourUtc}::int,
+          ${row.burstCount7d}::int
+        )
+      `),
+      sql`,`
+    );
+
+    await db.execute(sql`
+      UPDATE agents AS a
+      SET
+        influence_score = v.influence_score,
+        autonomy_score = v.autonomy_score,
+        activity_score = v.activity_score,
+        agent_type = v.agent_type,
+        posting_regularity = v.posting_regularity,
+        peak_hour_utc = v.peak_hour_utc,
+        burst_count_7d = v.burst_count_7d
+      FROM (
+        VALUES ${values}
+      ) AS v(
+        id,
+        influence_score,
+        autonomy_score,
+        activity_score,
+        agent_type,
+        posting_regularity,
+        peak_hour_utc,
+        burst_count_7d
+      )
+      WHERE a.id = v.id
+    `);
+  }
+}
+
+async function bulkUpdateTopics(
+  rows: Array<{
+    topicId: string;
+    velocity: number;
+    agentCount: number;
+    avgSentiment: number | null;
+  }>
+): Promise<void> {
+  for (const group of chunk(rows, 500)) {
+    const values = sql.join(
+      group.map((row) => sql`
+        (
+          ${row.topicId}::uuid,
+          ${row.velocity}::real,
+          ${row.agentCount}::int,
+          ${row.avgSentiment}::real
+        )
+      `),
+      sql`,`
+    );
+
+    await db.execute(sql`
+      UPDATE topics AS t
+      SET
+        velocity = v.velocity,
+        agent_count = v.agent_count,
+        avg_sentiment = v.avg_sentiment
+      FROM (
+        VALUES ${values}
+      ) AS v(id, velocity, agent_count, avg_sentiment)
+      WHERE t.id = v.id
+    `);
+  }
+}
+
 /**
- * Compute behavioral analysis. Call every 4 hours.
+ * Compute behavioral analysis with incremental cursors.
  */
 export async function runAnalysis(): Promise<{
   agentsUpdated: number;
@@ -154,66 +264,134 @@ export async function runAnalysis(): Promise<{
   const now = new Date();
   const last24h = subHours(now, 24);
   const last7d = subHours(now, 168);
+  const last14d = subDays(now, 14);
+  const last7dDate = subDays(now, 7);
 
-  // 1. Compute influence scores (PageRank-style)
-  // Include all agents active in last 7 days, even if they received no interactions.
-  const activeAgents = await db
-    .select({ agentId: actions.agentId })
-    .from(actions)
-    .where(gte(actions.performedAt, last7d))
-    .groupBy(actions.agentId);
+  const cursor = await getStageCursor("analyze", GLOBAL_CURSOR_SCOPE);
+  const cursorStart = cursor?.cursorTs ?? getBootstrapStart("analyze", now);
 
-  // Fetch all recent interactions for PageRank graph
-  const recentInteractions = await db
-    .select({
-      sourceAgentId: interactions.sourceAgentId,
-      targetAgentId: interactions.targetAgentId,
-      weight: interactions.weight,
-      actionId: interactions.actionId,
-    })
-    .from(interactions)
-    .where(gte(interactions.createdAt, last7d));
+  const [changedAgentsResult, changedTopicsResult] = await Promise.all([
+    db.execute<{ agent_id: string }>(sql`
+      SELECT DISTINCT agent_id
+      FROM (
+        SELECT a.agent_id
+        FROM actions a
+        WHERE a.agent_id IS NOT NULL
+          AND a.ingested_at >= ${cursorStart}
 
-  const analyzableAgentIds = new Set<string>();
-  for (const row of activeAgents) {
-    if (row.agentId) analyzableAgentIds.add(row.agentId);
+        UNION ALL
+
+        SELECT a.agent_id
+        FROM enrichments e
+        INNER JOIN actions a ON a.id = e.action_id
+        WHERE a.agent_id IS NOT NULL
+          AND e.processed_at >= ${cursorStart}
+
+        UNION ALL
+
+        SELECT i.source_agent_id AS agent_id
+        FROM interactions i
+        WHERE i.created_at >= ${cursorStart}
+
+        UNION ALL
+
+        SELECT i.target_agent_id AS agent_id
+        FROM interactions i
+        WHERE i.created_at >= ${cursorStart}
+      ) AS changed
+      WHERE agent_id IS NOT NULL
+    `),
+    db.execute<{ topic_id: string }>(sql`
+      SELECT DISTINCT topic_id
+      FROM (
+        SELECT at.topic_id
+        FROM action_topics at
+        INNER JOIN actions a ON a.id = at.action_id
+        WHERE a.ingested_at >= ${cursorStart}
+
+        UNION ALL
+
+        SELECT at.topic_id
+        FROM action_topics at
+        INNER JOIN actions a ON a.id = at.action_id
+        INNER JOIN enrichments e ON e.action_id = a.id
+        WHERE e.processed_at >= ${cursorStart}
+      ) AS changed
+      WHERE topic_id IS NOT NULL
+    `),
+  ]);
+
+  const changedAgentIds = extractRows<{ agent_id: string }>(changedAgentsResult)
+    .map((row) => row.agent_id)
+    .filter(Boolean);
+  const changedTopicIds = extractRows<{ topic_id: string }>(changedTopicsResult)
+    .map((row) => row.topic_id)
+    .filter(Boolean);
+
+  if (changedAgentIds.length === 0 && changedTopicIds.length === 0) {
+    await setStageCursor("analyze", GLOBAL_CURSOR_SCOPE, now, {
+      cursorStart: cursorStart.toISOString(),
+      reason: "no_changes",
+    });
+    return { agentsUpdated: 0, topicsUpdated: 0 };
   }
-  for (const inter of recentInteractions) {
-    analyzableAgentIds.add(inter.sourceAgentId);
-    analyzableAgentIds.add(inter.targetAgentId);
-  }
 
-  // Fetch substantive action IDs to weight quality
+  // Graph inputs are fetched once per run.
+  const [activeAgents, recentInteractions, substantiveResult] = await Promise.all([
+    db
+      .select({ agentId: actions.agentId })
+      .from(actions)
+      .where(gte(actions.performedAt, last7d))
+      .groupBy(actions.agentId),
+    db
+      .select({
+        sourceAgentId: interactions.sourceAgentId,
+        targetAgentId: interactions.targetAgentId,
+        weight: interactions.weight,
+        actionId: interactions.actionId,
+      })
+      .from(interactions)
+      .where(gte(interactions.createdAt, last7d)),
+    db.execute<{ action_id: string }>(sql`
+      SELECT action_id
+      FROM enrichments
+      WHERE is_substantive = true
+    `),
+  ]);
+
   const substantiveActionIds = new Set(
-    (await db
-      .select({ actionId: enrichments.actionId })
-      .from(enrichments)
-      .where(eq(enrichments.isSubstantive, true))
-    ).map((r) => r.actionId)
+    extractRows<{ action_id: string }>(substantiveResult).map((row) => row.action_id)
   );
 
-  // Build the interaction graph
   const allAgentIds = new Set<string>();
   const incomingEdges = new Map<string, Array<{ from: string; weight: number }>>();
+  const outgoingWeight = new Map<string, number>();
+
+  for (const row of activeAgents) {
+    if (row.agentId) allAgentIds.add(row.agentId);
+  }
 
   for (const inter of recentInteractions) {
     allAgentIds.add(inter.sourceAgentId);
     allAgentIds.add(inter.targetAgentId);
 
+    const qualityMultiplier = inter.actionId && substantiveActionIds.has(inter.actionId) ? 1.5 : 0.5;
+    const edgeWeight = toNumber(inter.weight) * qualityMultiplier;
+
     if (!incomingEdges.has(inter.targetAgentId)) {
       incomingEdges.set(inter.targetAgentId, []);
     }
-
-    const qualityMultiplier = inter.actionId && substantiveActionIds.has(inter.actionId) ? 1.5 : 0.5;
-    const edgeWeight = Number(inter.weight) * qualityMultiplier;
-
     incomingEdges.get(inter.targetAgentId)!.push({
       from: inter.sourceAgentId,
       weight: edgeWeight,
     });
+
+    outgoingWeight.set(
+      inter.sourceAgentId,
+      (outgoingWeight.get(inter.sourceAgentId) || 0) + edgeWeight
+    );
   }
 
-  // Simplified PageRank (10 iterations, damping 0.85)
   const DAMPING = 0.85;
   const ITERATIONS = 10;
   const agentIdsList = Array.from(allAgentIds);
@@ -224,302 +402,329 @@ export async function runAnalysis(): Promise<{
     scores.set(id, 1 / Math.max(n, 1));
   }
 
-  // Compute total outgoing weight per agent
-  const outgoingWeight = new Map<string, number>();
-  for (const inter of recentInteractions) {
-    const qualityMultiplier = inter.actionId && substantiveActionIds.has(inter.actionId) ? 1.5 : 0.5;
-    const w = Number(inter.weight) * qualityMultiplier;
-    outgoingWeight.set(
-      inter.sourceAgentId,
-      (outgoingWeight.get(inter.sourceAgentId) || 0) + w
-    );
-  }
-
   if (n > 0) {
     for (let iter = 0; iter < ITERATIONS; iter++) {
-      const newScores = new Map<string, number>();
-
+      const next = new Map<string, number>();
       for (const id of agentIdsList) {
         let incomingSum = 0;
         const edges = incomingEdges.get(id) || [];
-
         for (const edge of edges) {
           const senderScore = scores.get(edge.from) || 0;
-          const senderTotalOut = outgoingWeight.get(edge.from) || 1;
-          incomingSum += (senderScore * edge.weight) / senderTotalOut;
+          const senderOut = outgoingWeight.get(edge.from) || 1;
+          incomingSum += (senderScore * edge.weight) / senderOut;
         }
-
-        newScores.set(id, (1 - DAMPING) / n + DAMPING * incomingSum);
+        next.set(id, (1 - DAMPING) / n + DAMPING * incomingSum);
       }
-
-      for (const [id, score] of newScores) {
+      for (const [id, score] of next) {
         scores.set(id, score);
       }
     }
   }
 
-  // Normalize PageRank scores to 0-1 range
   const maxPageRank = Math.max(...scores.values(), 0.001);
   const normalizedScores = new Map<string, number>();
   for (const [id, score] of scores) {
     normalizedScores.set(id, score / maxPageRank);
   }
 
-  // Skip human service providers — scores are meaningless for non-autonomous actors
+  const agentsForUpdate = changedAgentIds.filter((id, index, list) => list.indexOf(id) === index);
+  const topicsForUpdate = changedTopicIds.filter((id, index, list) => list.indexOf(id) === index);
+
+  const [humanIdentityRows, autonomyResult, breakdownResult, recentCountsResult, firstSeenRows, dailyStatsRows] =
+    await Promise.all([
+      agentsForUpdate.length > 0
+        ? db
+            .select({ agentId: agentIdentities.agentId, rawProfile: agentIdentities.rawProfile })
+            .from(agentIdentities)
+            .where(inArray(agentIdentities.agentId, agentsForUpdate))
+        : Promise.resolve([]),
+      agentsForUpdate.length > 0
+        ? db.execute<{ agent_id: string; avg_autonomy: number | null }>(sql`
+            SELECT a.agent_id, AVG(e.autonomy_score)::real AS avg_autonomy
+            FROM actions a
+            LEFT JOIN enrichments e ON e.action_id = a.id
+            WHERE a.agent_id = ANY(${agentsForUpdate}::uuid[])
+            GROUP BY a.agent_id
+          `)
+        : Promise.resolve([]),
+      agentsForUpdate.length > 0
+        ? db.execute<{ agent_id: string; action_type: string; count: number }>(sql`
+            SELECT a.agent_id, a.action_type::text, COUNT(*)::int AS count
+            FROM actions a
+            WHERE a.agent_id = ANY(${agentsForUpdate}::uuid[])
+            GROUP BY a.agent_id, a.action_type
+          `)
+        : Promise.resolve([]),
+      agentsForUpdate.length > 0
+        ? db.execute<{
+            agent_id: string;
+            substantive_count: number;
+            non_substantive_count: number;
+            unenriched_count: number;
+          }>(sql`
+            SELECT
+              a.agent_id,
+              COUNT(*) FILTER (WHERE e.is_substantive = true)::int AS substantive_count,
+              COUNT(*) FILTER (
+                WHERE e.is_substantive = false OR e.is_substantive IS NULL
+              )::int AS non_substantive_count,
+              COUNT(*) FILTER (WHERE a.is_enriched = false)::int AS unenriched_count
+            FROM actions a
+            LEFT JOIN enrichments e ON e.action_id = a.id
+            WHERE a.agent_id = ANY(${agentsForUpdate}::uuid[])
+              AND a.performed_at >= ${last24h}
+            GROUP BY a.agent_id
+          `)
+        : Promise.resolve([]),
+      agentsForUpdate.length > 0
+        ? db
+            .select({ id: agents.id, firstSeenAt: agents.firstSeenAt })
+            .from(agents)
+            .where(inArray(agents.id, agentsForUpdate))
+        : Promise.resolve([]),
+      agentsForUpdate.length > 0
+        ? db
+            .select({
+              agentId: dailyAgentStats.agentId,
+              date: dailyAgentStats.date,
+              postCount: dailyAgentStats.postCount,
+              commentCount: dailyAgentStats.commentCount,
+              activeHours: dailyAgentStats.activeHours,
+            })
+            .from(dailyAgentStats)
+            .where(
+              sql`${dailyAgentStats.agentId} = ANY(${agentsForUpdate}::uuid[]) AND ${dailyAgentStats.date} >= ${last14d}`
+            )
+        : Promise.resolve([]),
+    ]);
+
   const humanAgentIds = new Set<string>();
-  if (analyzableAgentIds.size > 0) {
-    const identitiesWithKind = await db
-      .select({ agentId: agentIdentities.agentId, rawProfile: agentIdentities.rawProfile })
-      .from(agentIdentities)
-      .where(inArray(agentIdentities.agentId, [...analyzableAgentIds]));
-    for (const row of identitiesWithKind) {
-      if ((row.rawProfile as Record<string, unknown>)?.actorKind === "human") {
-        humanAgentIds.add(row.agentId);
-      }
+  for (const row of humanIdentityRows) {
+    if ((row.rawProfile as Record<string, unknown>)?.actorKind === "human") {
+      humanAgentIds.add(row.agentId);
     }
   }
 
-  let agentsUpdated = 0;
+  const autonomyByAgent = new Map<string, number>();
+  for (const row of extractRows<{ agent_id: string; avg_autonomy: number | null }>(autonomyResult)) {
+    autonomyByAgent.set(row.agent_id, toNumber(row.avg_autonomy, 0));
+  }
 
-  for (const agentId of analyzableAgentIds) {
+  const breakdownByAgent = new Map<string, { postCount: number; commentCount: number }>();
+  for (const row of extractRows<{ agent_id: string; action_type: string; count: number }>(breakdownResult)) {
+    const current = breakdownByAgent.get(row.agent_id) || { postCount: 0, commentCount: 0 };
+    const count = toNumber(row.count, 0);
+    if (row.action_type === "post") {
+      current.postCount += count;
+    } else if (row.action_type === "comment" || row.action_type === "reply") {
+      current.commentCount += count;
+    }
+    breakdownByAgent.set(row.agent_id, current);
+  }
+
+  const recentCountsByAgent = new Map<
+    string,
+    { substantiveCount: number; nonSubstantiveCount: number; unenrichedCount: number }
+  >();
+  for (const row of extractRows<{
+    agent_id: string;
+    substantive_count: number;
+    non_substantive_count: number;
+    unenriched_count: number;
+  }>(recentCountsResult)) {
+    recentCountsByAgent.set(row.agent_id, {
+      substantiveCount: toNumber(row.substantive_count),
+      nonSubstantiveCount: toNumber(row.non_substantive_count),
+      unenrichedCount: toNumber(row.unenriched_count),
+    });
+  }
+
+  const firstSeenByAgent = new Map<string, Date>();
+  for (const row of firstSeenRows) {
+    firstSeenByAgent.set(row.id, row.firstSeenAt);
+  }
+
+  const dailyStatsByAgent = new Map<
+    string,
+    Array<{ date: Date; postCount: number | null; commentCount: number | null; activeHours: unknown }>
+  >();
+  for (const row of dailyStatsRows) {
+    const existing = dailyStatsByAgent.get(row.agentId) || [];
+    existing.push(row);
+    dailyStatsByAgent.set(row.agentId, existing);
+  }
+
+  const updates: AgentUpdateRow[] = [];
+  for (const agentId of agentsForUpdate) {
     if (humanAgentIds.has(agentId)) continue;
+
     const influenceScore = normalizedScores.get(agentId) || 0;
+    const autonomyScore = autonomyByAgent.get(agentId) || 0;
 
-    // Get average autonomy score for this agent's actions
-    const agentEnrichments = await db
-      .select({
-        avgAutonomy: avg(enrichments.autonomyScore).as("avg_autonomy"),
-      })
-      .from(enrichments)
-      .innerJoin(actions, eq(enrichments.actionId, actions.id))
-      .where(eq(actions.agentId, agentId));
+    const breakdown = breakdownByAgent.get(agentId) || { postCount: 0, commentCount: 0 };
+    const postCount = breakdown.postCount;
+    const commentCount = breakdown.commentCount;
 
-    const autonomyScore = Number(agentEnrichments[0]?.avgAutonomy) || 0;
-
-    // Get activity breakdown
-    const activityBreakdown = await db
-      .select({
-        actionType: actions.actionType,
-        count: count(actions.id).as("count"),
-      })
-      .from(actions)
-      .where(eq(actions.agentId, agentId))
-      .groupBy(actions.actionType);
-
-    const postCount =
-      activityBreakdown.find((a) => a.actionType === "post")?.count || 0;
-    const commentCount = activityBreakdown
-      .filter((a) => a.actionType === "comment" || a.actionType === "reply")
-      .reduce((sum, a) => sum + Number(a.count), 0);
-
-    // Compute quality-weighted activity score (Phase 2.2)
-    // Substantive actions count 1.0, non-substantive count 0.3
-    const recentSubstantive = await db
-      .select({ count: count(actions.id) })
-      .from(actions)
-      .innerJoin(enrichments, eq(enrichments.actionId, actions.id))
-      .where(
-        sql`${actions.agentId} = ${agentId} AND ${actions.performedAt} >= ${last24h} AND ${enrichments.isSubstantive} = true`
-      );
-
-    const recentNonSubstantive = await db
-      .select({ count: count(actions.id) })
-      .from(actions)
-      .innerJoin(enrichments, eq(enrichments.actionId, actions.id))
-      .where(
-        sql`${actions.agentId} = ${agentId} AND ${actions.performedAt} >= ${last24h} AND (${enrichments.isSubstantive} = false OR ${enrichments.isSubstantive} IS NULL)`
-      );
-
-    // Also count unenriched recent actions (treat as 0.5 weight)
-    const recentUnenriched = await db
-      .select({ count: count(actions.id) })
-      .from(actions)
-      .where(
-        sql`${actions.agentId} = ${agentId} AND ${actions.performedAt} >= ${last24h} AND ${actions.isEnriched} = false`
-      );
-
-    const substantiveCount = Number(recentSubstantive[0]?.count) || 0;
-    const nonSubstantiveCount = Number(recentNonSubstantive[0]?.count) || 0;
-    const unenrichedCount = Number(recentUnenriched[0]?.count) || 0;
+    const recent = recentCountsByAgent.get(agentId) || {
+      substantiveCount: 0,
+      nonSubstantiveCount: 0,
+      unenrichedCount: 0,
+    };
     const qualityWeighted =
-      substantiveCount * 1.0 + nonSubstantiveCount * 0.3 + unenrichedCount * 0.5;
+      recent.substantiveCount * 1.0 + recent.nonSubstantiveCount * 0.3 + recent.unenrichedCount * 0.5;
     const activityScore = Math.min(qualityWeighted / 15, 1.0);
 
-    // Classify agent type
-    const total = Number(postCount) + Number(commentCount);
+    const total = postCount + commentCount;
     let agentType = "lurker";
-
-    // Check bot_farm FIRST — low autonomy + high volume is suspicious regardless of other patterns
-    if (autonomyScore < 0.2 && total > 30)
-      agentType = "bot_farm";
-    else if (total > 50 && Number(postCount) > Number(commentCount) * 2)
-      agentType = "content_creator";
-    else if (total > 50 && Number(commentCount) > Number(postCount) * 3)
-      agentType = "commenter";
-    else if (total > 50)
-      agentType = "conversationalist"; // balanced post/comment ratio
-    else if (total > 20)
-      agentType = "active";
+    if (autonomyScore < 0.2 && total > 30) agentType = "bot_farm";
+    else if (total > 50 && postCount > commentCount * 2) agentType = "content_creator";
+    else if (total > 50 && commentCount > postCount * 3) agentType = "commenter";
+    else if (total > 50) agentType = "conversationalist";
+    else if (total > 20) agentType = "active";
     else if (total >= 10 && total <= 20) {
-      // Check if agent is "rising" (first seen within 7 days)
-      const agentRecord = await db.query.agents.findFirst({
-        where: eq(agents.id, agentId),
-      });
-      if (agentRecord && (now.getTime() - new Date(agentRecord.firstSeenAt).getTime()) < 7 * 24 * 60 * 60 * 1000) {
+      const firstSeenAt = firstSeenByAgent.get(agentId);
+      if (firstSeenAt && now.getTime() - firstSeenAt.getTime() < 7 * 24 * 60 * 60 * 1000) {
         agentType = "rising";
       }
     }
 
-    // Update agent
-    await db
-      .update(agents)
-      .set({
-        influenceScore,
-        autonomyScore,
-        activityScore,
-        agentType,
-      })
-      .where(eq(agents.id, agentId));
+    const dailyStats = (dailyStatsByAgent.get(agentId) || []).sort(
+      (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()
+    );
 
-    // Save profile snapshot
-    await db.insert(agentProfiles).values({
+    let postingRegularity: number | null = null;
+    let peakHourUtc: number | null = null;
+    let burstCount7d = 0;
+
+    if (dailyStats.length >= 3) {
+      const dailyCounts = dailyStats.map((d) => toNumber(d.postCount) + toNumber(d.commentCount));
+      const mean = dailyCounts.reduce((sum, v) => sum + v, 0) / dailyCounts.length;
+      const variance =
+        dailyCounts.reduce((sum, v) => sum + Math.pow(v - mean, 2), 0) / dailyCounts.length;
+      postingRegularity = Math.sqrt(variance);
+
+      const hourCounts = new Map<number, number>();
+      for (const stat of dailyStats) {
+        if (!Array.isArray(stat.activeHours)) continue;
+        for (const hour of stat.activeHours as unknown[]) {
+          const normalizedHour = toNumber(hour, -1);
+          if (normalizedHour < 0 || normalizedHour > 23) continue;
+          hourCounts.set(normalizedHour, (hourCounts.get(normalizedHour) || 0) + 1);
+        }
+      }
+
+      let maxHourCount = 0;
+      for (const [hour, c] of hourCounts) {
+        if (c > maxHourCount) {
+          maxHourCount = c;
+          peakHourUtc = hour;
+        }
+      }
+
+      const last7dStats = dailyStats.filter(
+        (d) => new Date(d.date).getTime() >= last7dDate.getTime()
+      );
+      burstCount7d = last7dStats.filter((d) => {
+        const dayTotal = toNumber(d.postCount) + toNumber(d.commentCount);
+        return mean > 0 && dayTotal > mean * 3;
+      }).length;
+    }
+
+    updates.push({
       agentId,
       influenceScore,
       autonomyScore,
       activityScore,
       agentType,
-      postCount: Number(postCount),
-      commentCount: Number(commentCount),
+      postingRegularity,
+      peakHourUtc,
+      burstCount7d,
+      postCount,
+      commentCount,
     });
-
-    agentsUpdated++;
   }
 
-  // 2. Temporal pattern detection (Phase 2.4)
-  // Uses dailyAgentStats to compute posting regularity, peak hours, and burst detection
-  const last14d = subDays(now, 14);
-  const last7dDate = subDays(now, 7);
+  if (updates.length > 0) {
+    await bulkUpdateAgents(updates);
 
-  const agentsWithDailyStats = await db
-    .select({ agentId: dailyAgentStats.agentId })
-    .from(dailyAgentStats)
-    .where(gte(dailyAgentStats.date, last14d))
-    .groupBy(dailyAgentStats.agentId);
-
-  for (const { agentId } of agentsWithDailyStats) {
-    // Get 14-day daily stats
-    const dailyStats = await db
-      .select({
-        date: dailyAgentStats.date,
-        postCount: dailyAgentStats.postCount,
-        commentCount: dailyAgentStats.commentCount,
-        activeHours: dailyAgentStats.activeHours,
-      })
-      .from(dailyAgentStats)
-      .where(
-        and(
-          eq(dailyAgentStats.agentId, agentId),
-          gte(dailyAgentStats.date, last14d)
-        )
-      )
-      .orderBy(dailyAgentStats.date);
-
-    if (dailyStats.length < 3) continue; // Need at least 3 days of data
-
-    // Posting regularity: stddev of daily action counts
-    const dailyCounts = dailyStats.map(
-      (d) => (d.postCount ?? 0) + (d.commentCount ?? 0)
-    );
-    const mean = dailyCounts.reduce((a, b) => a + b, 0) / dailyCounts.length;
-    const variance =
-      dailyCounts.reduce((sum, c) => sum + Math.pow(c - mean, 2), 0) /
-      dailyCounts.length;
-    const postingRegularity = Math.sqrt(variance);
-
-    // Peak hours: flatten all active hours, find most common
-    const hourCounts = new Map<number, number>();
-    for (const d of dailyStats) {
-      if (d.activeHours && Array.isArray(d.activeHours)) {
-        for (const hour of d.activeHours) {
-          hourCounts.set(hour, (hourCounts.get(hour) || 0) + 1);
-        }
-      }
-    }
-    let peakHourUtc: number | null = null;
-    let maxHourCount = 0;
-    for (const [hour, c] of hourCounts) {
-      if (c > maxHourCount) {
-        maxHourCount = c;
-        peakHourUtc = hour;
-      }
-    }
-
-    // Burst detection: days in last 7d exceeding 3x the 14-day average
-    const avg14d = mean;
-    const last7dStats = dailyStats.filter(
-      (d) => new Date(d.date).getTime() >= last7dDate.getTime()
-    );
-    const burstCount7d = last7dStats.filter((d) => {
-      const dayTotal = (d.postCount ?? 0) + (d.commentCount ?? 0);
-      return avg14d > 0 && dayTotal > avg14d * 3;
-    }).length;
-
-    await db
-      .update(agents)
-      .set({
-        postingRegularity,
-        peakHourUtc,
-        burstCount7d,
-      })
-      .where(eq(agents.id, agentId));
-  }
-
-  // 3. Update topic stats
-  let topicsUpdated = 0;
-  const allTopics = await db.query.topics.findMany();
-
-  for (const topic of allTopics) {
-    // Count actions in last 24h for velocity
-    const recentActionCount = await db
-      .select({ count: count(actionTopics.id) })
-      .from(actionTopics)
-      .innerJoin(actions, eq(actionTopics.actionId, actions.id))
-      .where(
-        sql`${actionTopics.topicId} = ${topic.id} AND ${actions.performedAt} >= ${last24h}`
+    for (const profileChunk of chunk(updates, 500)) {
+      await db.insert(agentProfiles).values(
+        profileChunk.map((row) => ({
+          agentId: row.agentId,
+          influenceScore: row.influenceScore,
+          autonomyScore: row.autonomyScore,
+          activityScore: row.activityScore,
+          agentType: row.agentType,
+          postCount: row.postCount,
+          commentCount: row.commentCount,
+        }))
       );
-
-    // Count distinct agents
-    const distinctAgents = await db
-      .select({
-        count:
-          sql<number>`COUNT(DISTINCT ${actions.agentId})`.as("count"),
-      })
-      .from(actionTopics)
-      .innerJoin(actions, eq(actionTopics.actionId, actions.id))
-      .where(eq(actionTopics.topicId, topic.id));
-
-    // Avg sentiment
-    const avgSentiment = await db
-      .select({ avg: avg(enrichments.sentiment) })
-      .from(actionTopics)
-      .innerJoin(actions, eq(actionTopics.actionId, actions.id))
-      .innerJoin(enrichments, eq(enrichments.actionId, actions.id))
-      .where(eq(actionTopics.topicId, topic.id));
-
-    const actionCountVal = Number(recentActionCount[0]?.count) || 0;
-    const velocity = actionCountVal / 24; // actions per hour
-
-    await db
-      .update(topics)
-      .set({
-        velocity,
-        agentCount: Number(distinctAgents[0]?.count) || 0,
-        avgSentiment: Number(avgSentiment[0]?.avg) || null,
-      })
-      .where(eq(topics.id, topic.id));
-
-    topicsUpdated++;
+    }
   }
 
-  return { agentsUpdated, topicsUpdated };
+  const topicRows =
+    topicsForUpdate.length > 0
+      ? await db.execute<{
+          topic_id: string;
+          recent_count: number;
+          agent_count: number;
+          avg_sentiment: number | null;
+        }>(sql`
+          SELECT
+            at.topic_id,
+            COUNT(*) FILTER (WHERE a.performed_at >= ${last24h})::int AS recent_count,
+            COUNT(DISTINCT a.agent_id)::int AS agent_count,
+            AVG(e.sentiment)::real AS avg_sentiment
+          FROM action_topics at
+          INNER JOIN actions a ON a.id = at.action_id
+          LEFT JOIN enrichments e ON e.action_id = a.id
+          WHERE at.topic_id = ANY(${topicsForUpdate}::uuid[])
+          GROUP BY at.topic_id
+        `)
+      : [];
+
+  const topicStatsById = new Map<string, { recentCount: number; agentCount: number; avgSentiment: number | null }>();
+  for (const row of extractRows<{
+    topic_id: string;
+    recent_count: number;
+    agent_count: number;
+    avg_sentiment: number | null;
+  }>(topicRows)) {
+    topicStatsById.set(row.topic_id, {
+      recentCount: toNumber(row.recent_count),
+      agentCount: toNumber(row.agent_count),
+      avgSentiment: row.avg_sentiment == null ? null : toNumber(row.avg_sentiment, 0),
+    });
+  }
+
+  const topicUpdates = topicsForUpdate.map((topicId) => {
+    const stats = topicStatsById.get(topicId) || {
+      recentCount: 0,
+      agentCount: 0,
+      avgSentiment: null,
+    };
+    return {
+      topicId,
+      velocity: stats.recentCount / 24,
+      agentCount: stats.agentCount,
+      avgSentiment: stats.avgSentiment,
+    };
+  });
+
+  if (topicUpdates.length > 0) {
+    await bulkUpdateTopics(topicUpdates);
+  }
+
+  await setStageCursor("analyze", GLOBAL_CURSOR_SCOPE, now, {
+    cursorStart: cursorStart.toISOString(),
+    changedAgents: agentsForUpdate.length,
+    changedTopics: topicsForUpdate.length,
+    agentsUpdated: updates.length,
+    topicsUpdated: topicUpdates.length,
+  });
+
+  return {
+    agentsUpdated: updates.length,
+    topicsUpdated: topicUpdates.length,
+  };
 }

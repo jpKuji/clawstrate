@@ -36,6 +36,13 @@
       "when": 1770946000000,
       "tag": "0005_topic_semantic_merge",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1771010000000,
+      "tag": "0006_pipeline_split_scalability",
+      "breakpoints": true
     }
   ]
 }
