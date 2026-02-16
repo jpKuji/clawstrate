@@ -108,7 +108,6 @@ export async function runEnrichment(): Promise<{
   const errors: string[] = [];
   let enrichedCount = 0;
   const touchedTopicIds = new Set<string>();
-  const enrichedPlatforms = new Set<string>();
 
   // Get un-enriched actions
   const unenriched = await db.query.actions.findMany({
@@ -140,11 +139,11 @@ export async function runEnrichment(): Promise<{
         .insert(enrichments)
         .values({
           actionId: action.id,
-          sentiment: 0,
-          autonomyScore: 0,
-          originalityScore: 0,
-          independenceScore: 0,
-          coordinationSignal: 0,
+          sentiment: null,
+          autonomyScore: null,
+          originalityScore: null,
+          independenceScore: null,
+          coordinationSignal: null,
           isSubstantive: false,
           intent: "marketplace_assignment",
           entities: [],
@@ -164,7 +163,6 @@ export async function runEnrichment(): Promise<{
         .where(eq(actions.id, action.id));
 
       enrichedCount++;
-      enrichedPlatforms.add(action.platformId);
     } catch (e: any) {
       errors.push(`deterministic enrichment ${action.platformActionId}: ${e.message}`);
     }
@@ -437,7 +435,6 @@ export async function runEnrichment(): Promise<{
             .where(eq(actions.id, action.id));
 
           enrichedCount++;
-          enrichedPlatforms.add(action.platformId);
         } catch (e: any) {
           errors.push(`save enrichment ${action.platformActionId}: ${e.message}`);
         }
@@ -448,9 +445,9 @@ export async function runEnrichment(): Promise<{
   }
 
   // Fully-automated semantic topic merging:
-  // If Moltbook actions were enriched this run, run a small semantic merge pass focused on the topics we touched.
+  // Run a small semantic merge pass focused on the topics we touched.
   // This keeps taxonomy clean without manual approval. Failures here should not fail the enrich stage.
-  if (enrichedCount > 0 && enrichedPlatforms.has("moltbook") && touchedTopicIds.size > 0) {
+  if (enrichedCount > 0 && touchedTopicIds.size > 0) {
     try {
       const res = await autoMergeSemanticTopicsForTopicIds({
         topicIds: Array.from(touchedTopicIds),

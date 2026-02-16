@@ -281,4 +281,45 @@ describe("runEnrichment", () => {
     expect(mockAnthropicCreate).not.toHaveBeenCalled();
     expect(mockInsert).toHaveBeenCalled();
   });
+
+  it("deterministic enrichments use null scores (not zero) so AVG() ignores them", async () => {
+    const capturedValues: Record<string, unknown>[] = [];
+    mockInsert.mockImplementation(() => {
+      const chain: any = new Proxy({}, {
+        get(_, prop) {
+          if (prop === "then") return undefined;
+          if (prop === "values") return (v: Record<string, unknown>) => {
+            capturedValues.push(v);
+            return chain;
+          };
+          if (prop === "returning") return () => Promise.resolve([{ id: "test-uuid" }]);
+          return () => chain;
+        },
+      });
+      return chain;
+    });
+
+    const assignmentAction = {
+      ...mockDbAction,
+      id: "assignment-action-1",
+      platformId: "rentahuman",
+      actionType: "comment",
+      platformActionId: "assignment_b1_h1",
+      rawData: { kind: "assignment" },
+      isEnriched: false,
+    };
+    mockFindMany.mockResolvedValue([assignmentAction]);
+
+    await runEnrichment();
+
+    expect(mockAnthropicCreate).not.toHaveBeenCalled();
+    // Find the enrichment insert (has actionId and sentiment fields)
+    const enrichmentValues = capturedValues.find((v) => "sentiment" in v);
+    expect(enrichmentValues).toBeDefined();
+    expect(enrichmentValues!.sentiment).toBeNull();
+    expect(enrichmentValues!.autonomyScore).toBeNull();
+    expect(enrichmentValues!.originalityScore).toBeNull();
+    expect(enrichmentValues!.independenceScore).toBeNull();
+    expect(enrichmentValues!.coordinationSignal).toBeNull();
+  });
 });

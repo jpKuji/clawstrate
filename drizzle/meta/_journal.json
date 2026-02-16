@@ -50,6 +50,20 @@
       "when": 1771100000000,
       "tag": "0007_drop_redundant_topic_index",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1771246748910,
+      "tag": "0008_magenta_jigsaw",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1771350000000,
+      "tag": "0009_fix_deterministic_enrichment_nulls",
+      "breakpoints": true
     }
   ]
 }
