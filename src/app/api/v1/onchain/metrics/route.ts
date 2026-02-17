@@ -29,8 +29,56 @@ export async function GET(req: NextRequest) {
     `),
   ]);
 
+  const [configuredByChainResult, seenByChainResult, enabledChainsResult] = await Promise.all([
+    db.execute(sql`
+      SELECT chain_id, COUNT(DISTINCT address)::int AS count
+      FROM onchain_contracts
+      WHERE standard = 'erc4337'
+        AND role = 'entrypoint'
+        AND enabled = true
+      GROUP BY chain_id
+      ORDER BY chain_id
+    `),
+    db.execute(sql`
+      SELECT chain_id, COUNT(DISTINCT entry_point)::int AS count
+      FROM erc4337_userops
+      WHERE updated_at >= NOW() - INTERVAL '24 hours'
+        AND entry_point IS NOT NULL
+      GROUP BY chain_id
+      ORDER BY chain_id
+    `),
+    db.execute(sql`
+      SELECT chain_id
+      FROM onchain_chains
+      WHERE enabled = true
+      ORDER BY chain_id
+    `),
+  ]);
+
   const totals = extractRows<Record<string, unknown>>(totalsResult)[0] ?? {};
   const recent = extractRows<Record<string, unknown>>(recentResult)[0] ?? {};
+  const configuredByChainRows = extractRows<Record<string, unknown>>(configuredByChainResult);
+  const seenByChainRows = extractRows<Record<string, unknown>>(seenByChainResult);
+  const enabledChainsRows = extractRows<Record<string, unknown>>(enabledChainsResult);
+
+  const configuredByChain = Object.fromEntries(
+    configuredByChainRows.map((row) => [String(Number(row.chain_id)), Number(row.count ?? 0)])
+  );
+  const seenByChain24h = Object.fromEntries(
+    seenByChainRows.map((row) => [String(Number(row.chain_id)), Number(row.count ?? 0)])
+  );
+  const configuredEntryPoints = Object.values(configuredByChain).reduce(
+    (sum, value) => sum + Number(value),
+    0
+  );
+  const seenEntryPoints24h = Object.values(seenByChain24h).reduce(
+    (sum, value) => sum + Number(value),
+    0
+  );
+  const enabledChainIds = enabledChainsRows.map((row) => Number(row.chain_id));
+  const isDualEntryPointConfigured =
+    enabledChainIds.length > 0 &&
+    enabledChainIds.every((chainId) => Number(configuredByChain[String(chainId)] ?? 0) >= 2);
 
   return NextResponse.json({
     totals: {
@@ -45,6 +93,13 @@ export async function GET(req: NextRequest) {
       events: Number(recent.events_24h ?? 0),
       agents: Number(recent.agents_24h ?? 0),
       userOps: Number(recent.userops_24h ?? 0),
+    },
+    erc4337Coverage: {
+      configuredEntryPoints,
+      seenEntryPoints24h,
+      configuredByChain,
+      seenByChain24h,
+      isDualEntryPointConfigured,
     },
   });
 }

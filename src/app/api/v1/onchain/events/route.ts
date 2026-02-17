@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { sql } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { extractRows, parsePositiveInt } from "@/lib/onchain/api-utils";
+import { extractRows, parseOptionalChainId, parsePositiveInt } from "@/lib/onchain/api-utils";
 import { enforceOnchainQuota, getAccountIdFromRequest } from "@/lib/onchain/quota";
 
 export async function GET(req: NextRequest) {
@@ -12,16 +12,21 @@ export async function GET(req: NextRequest) {
   }
 
   const { searchParams } = new URL(req.url);
-  const chainId = searchParams.get("chainId");
+  const parsedChainId = parseOptionalChainId(searchParams.get("chainId"));
+  if (!parsedChainId.valid) {
+    return NextResponse.json({ error: "Invalid chainId" }, { status: 400 });
+  }
   const standard = searchParams.get("standard")?.trim();
   const eventName = searchParams.get("eventName")?.trim();
+  const entryPoint = searchParams.get("entryPoint")?.trim().toLowerCase();
   const limit = Math.min(parsePositiveInt(searchParams.get("limit"), 100), 500);
   const offset = Math.max(parsePositiveInt(searchParams.get("offset"), 0), 0);
 
   const filters = [sql`TRUE`];
-  if (chainId) filters.push(sql`chain_id = ${Number(chainId)}`);
+  if (parsedChainId.value != null) filters.push(sql`chain_id = ${parsedChainId.value}`);
   if (standard) filters.push(sql`standard = ${standard}`);
   if (eventName) filters.push(sql`event_name = ${eventName}`);
+  if (entryPoint) filters.push(sql`contract_address = ${entryPoint}`);
 
   const whereSql = sql.join(filters, sql` AND `);
 

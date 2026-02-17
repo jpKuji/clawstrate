@@ -155,6 +155,20 @@ function parseAbi(value: string): AbiEvent {
   return parseAbiItem(value) as AbiEvent;
 }
 
+function getErc4337EntryPoints(chain: ChainManifestEntry): `0x${string}`[] {
+  const parsed: `0x${string}`[] = [];
+  for (const candidate of chain.contracts.erc4337EntryPoints ?? []) {
+    const address = asAddress(candidate);
+    if (address) parsed.push(address);
+  }
+
+  // Backward compatibility for older manifests with a single entrypoint.
+  const legacy = asAddress(chain.contracts.erc4337EntryPoint ?? null);
+  if (legacy) parsed.push(legacy);
+
+  return Array.from(new Set(parsed));
+}
+
 function streamFor(
   chain: ChainManifestEntry,
   standard: OnchainStandard,
@@ -223,8 +237,8 @@ export function buildContractStreams(manifest: OnchainManifest): ContractStream[
       streams.push(...streamFor(chain, "erc6551", "registry", erc6551, chain.startBlock));
     }
 
-    const entryPoint = asAddress(chain.contracts.erc4337EntryPoint ?? null);
-    if (entryPoint) {
+    const entryPoints = getErc4337EntryPoints(chain);
+    for (const entryPoint of entryPoints) {
       streams.push(...streamFor(chain, "erc4337", "entrypoint", entryPoint, chain.startBlock));
     }
 

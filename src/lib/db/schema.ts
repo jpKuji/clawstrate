@@ -682,6 +682,32 @@ export const onchainEventLogs = pgTable(
   ]
 );
 
+export const onchainIngestDeadLetters = pgTable(
+  "onchain_ingest_dead_letters",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    scope: text("scope").notNull(),
+    chainId: integer("chain_id")
+      .references(() => onchainChains.chainId)
+      .notNull(),
+    standard: text("standard").notNull(),
+    contractAddress: text("contract_address").notNull(),
+    blockNumber: integer("block_number"),
+    txHash: text("tx_hash").notNull(),
+    logIndex: integer("log_index").notNull(),
+    eventName: text("event_name").notNull(),
+    error: text("error").notNull(),
+    payloadJson: jsonb("payload_json").$type<Record<string, unknown>>(),
+    firstSeenAt: timestamp("first_seen_at").defaultNow().notNull(),
+    lastSeenAt: timestamp("last_seen_at").defaultNow().notNull(),
+  },
+  (t) => [
+    uniqueIndex("idx_onchain_dead_letter_unique").on(t.scope, t.chainId, t.txHash, t.logIndex),
+    index("idx_onchain_dead_letter_chain").on(t.chainId, t.blockNumber),
+    index("idx_onchain_dead_letter_last_seen").on(t.lastSeenAt),
+  ]
+);
+
 export const erc8004Agents = pgTable(
   "erc8004_agents",
   {
@@ -737,7 +763,7 @@ export const erc8004Feedbacks = pgTable(
       .references(() => erc8004Agents.agentKey)
       .notNull(),
     clientAddress: text("client_address").notNull(),
-    feedbackIndex: integer("feedback_index").notNull(),
+    feedbackIndex: text("feedback_index").notNull(),
     valueNumeric: text("value_numeric"), // int128 serialized as text
     valueDecimals: integer("value_decimals"),
     tag1: text("tag1"),

@@ -16,7 +16,10 @@
           "validationRegistry": "0x8004cc8439f36fd5f9f049d9ff86523df6daab58"
         },
         "erc6551Registry": "0x000000006551c19487814612e58fe06813775758",
-        "erc4337EntryPoint": "0x5ff137d4b0fdcd49dca30c7cf57e578a026d2789",
+        "erc4337EntryPoints": [
+          "0x5ff137d4b0fdcd49dca30c7cf57e578a026d2789",
+          "0x4337084d9e255ff0702461cf8895ce9e3b5ff108"
+        ],
         "erc8001Contracts": [],
         "erc7007Contracts": [],
         "erc7579Accounts": []
@@ -38,7 +41,10 @@
           "validationRegistry": "0x8004cc8439f36fd5f9f049d9ff86523df6daab58"
         },
         "erc6551Registry": "0x000000006551c19487814612e58fe06813775758",
-        "erc4337EntryPoint": "0x5ff137d4b0fdcd49dca30c7cf57e578a026d2789",
+        "erc4337EntryPoints": [
+          "0x5ff137d4b0fdcd49dca30c7cf57e578a026d2789",
+          "0x4337084d9e255ff0702461cf8895ce9e3b5ff108"
+        ],
         "erc8001Contracts": [],
         "erc7007Contracts": [],
         "erc7579Accounts": []
@@ -60,7 +66,10 @@
           "validationRegistry": "0x8004cc8439f36fd5f9f049d9ff86523df6daab58"
         },
         "erc6551Registry": "0x000000006551c19487814612e58fe06813775758",
-        "erc4337EntryPoint": "0x5ff137d4b0fdcd49dca30c7cf57e578a026d2789",
+        "erc4337EntryPoints": [
+          "0x5ff137d4b0fdcd49dca30c7cf57e578a026d2789",
+          "0x4337084d9e255ff0702461cf8895ce9e3b5ff108"
+        ],
         "erc8001Contracts": [],
         "erc7007Contracts": [],
         "erc7579Accounts": []
@@ -82,7 +91,10 @@
           "validationRegistry": "0x8004cc8439f36fd5f9f049d9ff86523df6daab58"
         },
         "erc6551Registry": "0x000000006551c19487814612e58fe06813775758",
-        "erc4337EntryPoint": "0x5ff137d4b0fdcd49dca30c7cf57e578a026d2789",
+        "erc4337EntryPoints": [
+          "0x5ff137d4b0fdcd49dca30c7cf57e578a026d2789",
+          "0x4337084d9e255ff0702461cf8895ce9e3b5ff108"
+        ],
         "erc8001Contracts": [],
         "erc7007Contracts": [],
         "erc7579Accounts": []
@@ -104,7 +116,10 @@
           "validationRegistry": "0x8004cc8439f36fd5f9f049d9ff86523df6daab58"
         },
         "erc6551Registry": "0x000000006551c19487814612e58fe06813775758",
-        "erc4337EntryPoint": "0x5ff137d4b0fdcd49dca30c7cf57e578a026d2789",
+        "erc4337EntryPoints": [
+          "0x5ff137d4b0fdcd49dca30c7cf57e578a026d2789",
+          "0x4337084d9e255ff0702461cf8895ce9e3b5ff108"
+        ],
         "erc8001Contracts": [],
         "erc7007Contracts": [],
         "erc7579Accounts": []

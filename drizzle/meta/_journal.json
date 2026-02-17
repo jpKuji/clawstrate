@@ -64,6 +64,13 @@
       "when": 1771350000000,
       "tag": "0009_fix_deterministic_enrichment_nulls",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1771430000000,
+      "tag": "0010_onchain_dead_letters_feedback_index_text",
+      "breakpoints": true
     }
   ]
 }

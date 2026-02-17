@@ -36,6 +36,7 @@ export interface OnchainIngestResult {
     logsFetched: number;
     logsPersisted: number;
     logsSkippedByAgentFilter: number;
+    logsFailed: number;
     fromBlock: number | null;
     toBlock: number | null;
   }>;

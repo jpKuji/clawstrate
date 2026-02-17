@@ -13,3 +13,14 @@ export function parsePositiveInt(input: string | null | undefined, fallback: num
   if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
   return Math.floor(parsed);
 }
+
+export function parseOptionalChainId(
+  input: string | null | undefined
+): { value: number | null; valid: boolean } {
+  if (!input) return { value: null, valid: true };
+  const parsed = Number(input);
+  if (!Number.isFinite(parsed) || parsed <= 0 || !Number.isInteger(parsed)) {
+    return { value: null, valid: false };
+  }
+  return { value: parsed, valid: true };
+}
