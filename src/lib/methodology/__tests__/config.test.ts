@@ -64,7 +64,7 @@ describe("source methodology registry sync", () => {
       .map((source) => source.id)
       .sort();
 
-    expect(enabledMethodologyIds).toEqual(enabledAdapterIds);
+    expect(enabledMethodologyIds).toEqual([...enabledAdapterIds, "onchain"].sort());
   });
 
   it("captures Moltbook comment inclusion threshold from implementation behavior", () => {

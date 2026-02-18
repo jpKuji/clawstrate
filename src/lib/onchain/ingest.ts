@@ -30,6 +30,11 @@ import {
   toDateFromUnix,
 } from "./normalize";
 import type { ChainId, ChainManifestEntry, ContractStream, OnchainIngestResult } from "./types";
+import {
+  buildOnchainTopicLlmBudget,
+  type OnchainTopicLlmBudget,
+  upsertOnchainEventEnrichment,
+} from "./topics";
 
 const STAGE_NAME = "onchain";
 const REORG_WINDOW = 12;
@@ -1160,6 +1165,54 @@ async function processStreamEvent(input: {
   }
 }
 
+async function deriveAgentKeysForEvent(input: {
+  stream: ContractStream;
+  log: any;
+}): Promise<string[]> {
+  const args = (input.log.args ?? {}) as Record<string, unknown>;
+  const keys = new Set<string>();
+
+  if (input.stream.standard === "erc8004") {
+    const agentIdRaw = args.agentId as bigint | number | string | undefined;
+    if (agentIdRaw != null) {
+      const registryAddress =
+        input.stream.role === "identity_registry"
+          ? input.stream.address
+          : input.stream.identityRegistryAddress ?? input.stream.address;
+      keys.add(makeAgentKey(input.stream.chainId, registryAddress, agentIdRaw));
+    }
+  }
+
+  if (input.stream.standard === "erc6551" && input.stream.eventName === "ERC6551AccountCreated") {
+    const tokenContract = normalizeAddress(args.tokenContract);
+    const tokenId = asText(args.tokenId);
+    if (tokenContract && tokenId) {
+      keys.add(`${input.stream.chainId}:${tokenContract}:${tokenId}`);
+    }
+  }
+
+  if (input.stream.standard === "erc4337") {
+    const sender = normalizeAddress(args.sender);
+    if (sender) {
+      const rows = await db
+        .select({ agentKey: erc8004Agents.agentKey })
+        .from(erc8004Agents)
+        .where(
+          and(
+            eq(erc8004Agents.chainId, input.stream.chainId),
+            eq(erc8004Agents.agentWallet, sender)
+          )
+        )
+        .limit(2);
+      for (const row of rows) {
+        if (row.agentKey) keys.add(row.agentKey);
+      }
+    }
+  }
+
+  return Array.from(keys);
+}
+
 async function fetchBlockTime(
   client: any,
   blockNumber: bigint,
@@ -1242,7 +1295,8 @@ async function ingestStream(
   stream: ContractStream,
   opts: { backfill?: boolean },
   knownWalletsCache: Map<ChainId, Set<string>>,
-  deadlineMs: number
+  deadlineMs: number,
+  llmBudget: OnchainTopicLlmBudget
 ): Promise<IngestStreamResult> {
   const chainConfig = chainConfigById(stream.chainId);
   const client = getPublicClient(stream.chainId, buildRpcUrlList(stream.chainId, chainConfig.rpcUrls));
@@ -1382,6 +1436,18 @@ async function ingestStream(
       const blockTime = await fetchBlockTime(client, log.blockNumber, blockTimeCache, deadlineMs, scope);
       await insertCanonicalLog({ stream, log, blockTime });
       await processStreamEvent({ stream, log, blockTime });
+      const agentKeys = await deriveAgentKeysForEvent({ stream, log });
+      await upsertOnchainEventEnrichment({
+        stream,
+        eventName: stream.eventName,
+        chainId: stream.chainId,
+        txHash: asText(log.transactionHash) ?? "",
+        logIndex: asNum(log.logIndex),
+        blockTime,
+        args: ((log.args ?? {}) as Record<string, unknown>),
+        agentKeys,
+        llmBudget,
+      });
       logsPersisted += 1;
       lastProcessedBlock = asNum(log.blockNumber);
     } catch (error) {
@@ -1588,6 +1654,7 @@ export async function runOnchainIngestion(opts?: {
   let streamsProcessed = 0;
   let eventsIngested = 0;
   const knownWalletsCache = new Map<ChainId, Set<string>>();
+  const llmBudget = buildOnchainTopicLlmBudget();
   const runDeadlineMs = Date.now() + RUN_BUDGET_MS;
 
   await upsertManifestRows();
@@ -1607,7 +1674,7 @@ export async function runOnchainIngestion(opts?: {
     try {
       const streamTimeoutMs = Math.max(1, Math.min(STREAM_PROCESS_TIMEOUT_MS, remain - 200));
       const result = await withTimeout(
-        ingestStream(stream, opts ?? {}, knownWalletsCache, runDeadlineMs),
+        ingestStream(stream, opts ?? {}, knownWalletsCache, runDeadlineMs, llmBudget),
         streamTimeoutMs,
         `stream:${streamScope(stream)}`
       );

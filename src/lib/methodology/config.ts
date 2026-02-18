@@ -213,10 +213,40 @@ export const GLOBAL_METHODOLOGY_CONFIG: GlobalMethodologyConfig = {
 };
 
 export function getIntegratedSourceMethodologies(): MethodologySourceView[] {
-  return getSourceAdapters().map((adapter) => ({
+  const adapterMethodologies = getSourceAdapters().map((adapter) => ({
     ...adapter.methodology,
     isEnabled: adapter.isEnabled(),
   }));
+
+  const onchainMethodology: MethodologySourceView = {
+    id: "onchain",
+    displayName: "EVM Onchain",
+    status: "beta",
+    coverageSummary:
+      "Ingests ERC-8004 and related EVM standards, derives economic-intent topics, and tracks cross-chain agent activity.",
+    ingestionBehavior: [
+      `Runs dedicated onchain ingestion on ${PIPELINE_RUNTIME_CADENCE.onchainCron} (${PIPELINE_RUNTIME_CADENCE.onchainRoute}).`,
+      "Persists canonical event logs and protocol-native entities (agents, feedback, validations, account abstraction events).",
+      "Assigns deterministic economic topics per event family and selectively applies LLM refinement for high-value metadata-rich events.",
+      "Stores event-to-agent and event-to-topic joins for cross-source agent/topic surfaces.",
+    ],
+    identityModel:
+      "Primary identity is protocol-native (`agentKey = chainId:registry:agentId`). Wallet and metadata links are attached when present; cross-source merges are API-level today.",
+    knownLimitations: [
+      "Not every onchain event resolves to a known agent identity (especially infra-only events).",
+      "Topic quality depends on decoded payload completeness; sparse logs fall back to deterministic taxonomy.",
+      "Onchain scoring is source-aware and not directly equivalent to forum engagement scoring.",
+    ],
+    sourceSpecificMetrics: [
+      { label: "Primary standards", value: "ERC-8004, ERC-6551, ERC-4337, ERC-8001, ERC-7007, ERC-7579, EIP-7702" },
+      { label: "Ingest cadence", value: `${PIPELINE_RUNTIME_CADENCE.onchainCron} (${PIPELINE_RUNTIME_CADENCE.onchainRoute})` },
+      { label: "Backfill cadence", value: `${PIPELINE_RUNTIME_CADENCE.onchainBackfillCron} (${PIPELINE_RUNTIME_CADENCE.onchainBackfillRoute})` },
+      { label: "Topic strategy", value: "Deterministic economic taxonomy + selective LLM refinement" },
+    ],
+    isEnabled: true,
+  };
+
+  return [...adapterMethodologies, onchainMethodology];
 }
 
 export function getEnabledSourceMethodologies(): MethodologySourceView[] {

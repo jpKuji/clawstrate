@@ -24,7 +24,7 @@ interface Agent {
   lastSeenAt: string;
   platformIds?: string[];
   actorKind?: string;
-  sourceProfileType?: "forum_ai" | "marketplace_ai";
+  sourceProfileType?: "forum_ai" | "marketplace_ai" | "onchain_ai";
 }
 
 const typeColors: Record<string, string> = {
@@ -73,6 +73,14 @@ export function AgentTable({
                     className="border-zinc-700 text-zinc-500 text-[10px]"
                   >
                     marketplace
+                  </Badge>
+                )}
+                {agent.sourceProfileType === "onchain_ai" && (
+                  <Badge
+                    variant="outline"
+                    className="border-fuchsia-700 text-fuchsia-400 text-[10px]"
+                  >
+                    onchain
                   </Badge>
                 )}
               </div>

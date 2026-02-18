@@ -85,6 +85,36 @@ describe("GET /api/v1/agents", () => {
     expect(mockDb.query.agents.findMany).toHaveBeenCalledOnce();
   });
 
+  it("returns onchain agents for source=onchain", async () => {
+    mockDb.execute.mockResolvedValueOnce({
+      rows: [
+        {
+          agent_key: "1:0xregistry:42",
+          chain_id: 1,
+          owner_address: "0xowner",
+          agent_wallet: "0xwallet",
+          created_at: new Date("2026-01-01T00:00:00.000Z"),
+          updated_at: new Date("2026-01-02T00:00:00.000Z"),
+          display_name: "Onchain Agent",
+          description: "desc",
+          total_events: 12,
+          events_24h: 6,
+          unique_event_types: 3,
+          proactive_events: 4,
+          reactive_events: 2,
+        },
+      ],
+    });
+
+    const res = await listAgents(makeListRequest({ source: "onchain" }));
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body).toHaveLength(1);
+    expect(body[0].id).toBe("onchain:1:0xregistry:42");
+    expect(body[0].sourceProfileType).toBe("onchain_ai");
+  });
+
   it("supports sort parameter: influence", async () => {
     mockDb.query.agents.findMany.mockResolvedValueOnce([]);
 
@@ -144,7 +174,7 @@ describe("GET /api/v1/agents", () => {
   it("respects limit parameter with default of 50", async () => {
     mockDb.query.agents.findMany.mockResolvedValueOnce([]);
 
-    await listAgents(makeListRequest());
+    await listAgents(makeListRequest({ source: "moltbook" }));
 
     const call = mockDb.query.agents.findMany.mock.calls[0][0];
     expect(call.limit).toBe(50);
@@ -153,7 +183,7 @@ describe("GET /api/v1/agents", () => {
   it("respects custom limit parameter", async () => {
     mockDb.query.agents.findMany.mockResolvedValueOnce([]);
 
-    await listAgents(makeListRequest({ limit: "25" }));
+    await listAgents(makeListRequest({ source: "moltbook", limit: "25" }));
 
     const call = mockDb.query.agents.findMany.mock.calls[0][0];
     expect(call.limit).toBe(25);
@@ -162,7 +192,7 @@ describe("GET /api/v1/agents", () => {
   it("caps limit at 100", async () => {
     mockDb.query.agents.findMany.mockResolvedValueOnce([]);
 
-    await listAgents(makeListRequest({ limit: "500" }));
+    await listAgents(makeListRequest({ source: "moltbook", limit: "500" }));
 
     const call = mockDb.query.agents.findMany.mock.calls[0][0];
     expect(call.limit).toBe(100);
@@ -221,6 +251,77 @@ describe("GET /api/v1/agents/[id]", () => {
     expect(body.marketplaceMetrics.bountiesPosted).toBe(4);
     expect(body.marketplaceMetrics.uniqueContributors).toBe(6);
     expect(body.recentActions).toHaveLength(1);
+  });
+
+  it("returns onchain profile for onchain-prefixed ids", async () => {
+    mockDb.select
+      .mockImplementationOnce(() =>
+        chainableSelect([
+          {
+            agentKey: "1:0xregistry:42",
+            chainId: 1,
+            registryAddress: "0xregistry",
+            agentId: "42",
+            ownerAddress: "0xowner",
+            agentUri: "ipfs://agent",
+            agentWallet: "0xwallet",
+            isActive: true,
+            createdAt: new Date("2026-01-01T00:00:00.000Z"),
+            updatedAt: new Date("2026-01-02T00:00:00.000Z"),
+            name: "Onchain Agent",
+            description: "desc",
+            protocols: ["x402"],
+            x402Supported: true,
+            parseStatus: "success",
+            serviceEndpoints: {},
+            crossChain: [],
+          },
+        ])
+      )
+      .mockImplementation(() => chainableSelect([{ count: 0 }]));
+
+    mockDb.execute
+      .mockResolvedValueOnce({
+        rows: [
+          {
+            total_events: 10,
+            events_24h: 4,
+            unique_event_types: 3,
+            proactive_events: 3,
+            reactive_events: 1,
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        rows: [
+          { day: "2026-01-02", events: 4, proactive_events: 3, reactive_events: 1 },
+        ],
+      })
+      .mockResolvedValueOnce({
+        rows: [
+          {
+            chain_id: 1,
+            tx_hash: "0xtx",
+            log_index: 0,
+            block_time: new Date("2026-01-02T00:00:00.000Z"),
+            standard: "erc8004",
+            event_name: "Registered",
+            topic_slugs: ["agent-registration"],
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        rows: [{ address: "0xclient", role: "feedback_client", count: 2 }],
+      });
+
+    const req = makeDetailRequest("onchain:1:0xregistry:42");
+    const res = await getAgent(req, { params: Promise.resolve({ id: "onchain:1:0xregistry:42" }) });
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.profileVariant).toBe("onchain_ai");
+    expect(body.agent.id).toBe("onchain:1:0xregistry:42");
+    expect(body.recentEvents).toHaveLength(1);
   });
 
   it("returns 404 when agent id is not found", async () => {
