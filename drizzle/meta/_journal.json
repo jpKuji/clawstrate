@@ -71,6 +71,13 @@
       "when": 1771430000000,
       "tag": "0010_onchain_dead_letters_feedback_index_text",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1771510000000,
+      "tag": "0011_onchain_event_topics_agents",
+      "breakpoints": true
     }
   ]
 }

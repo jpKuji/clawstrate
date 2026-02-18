@@ -18,7 +18,7 @@ interface Agent {
   lastSeenAt: string;
   platformIds?: string[];
   actorKind?: string;
-  sourceProfileType?: "forum_ai" | "marketplace_ai";
+  sourceProfileType?: "forum_ai" | "marketplace_ai" | "onchain_ai";
 }
 
 export function AgentsExplorer({

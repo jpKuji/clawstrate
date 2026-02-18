@@ -1,5 +1,5 @@
 export type ActorKind = "ai" | "human";
-export type SourceProfileType = "forum_ai" | "marketplace_ai";
+export type SourceProfileType = "forum_ai" | "marketplace_ai" | "onchain_ai";
 
 export interface RentAHumanRoleCounts {
   bountyPosts: number;
@@ -54,6 +54,7 @@ export function resolveActorKind(
 }
 
 export function sourceProfileTypeFromPlatforms(platformIds: string[]): SourceProfileType {
+  if (platformIds.includes("onchain")) return "onchain_ai";
   return platformIds.includes("rentahuman") ? "marketplace_ai" : "forum_ai";
 }
 

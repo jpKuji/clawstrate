@@ -106,10 +106,66 @@ describe("GET /api/v1/topics", () => {
     expect(mockDb.query.topics.findMany).toHaveBeenCalledOnce();
   });
 
+  it("returns onchain-derived topics for source=onchain", async () => {
+    mockDb.execute.mockResolvedValueOnce({
+      rows: [
+        {
+          topic_slug: "agent-registration",
+          topic_name: "Agent Registration",
+          velocity: 0.8,
+          action_count: 20,
+          agent_count: 7,
+          last_seen_at: new Date("2026-01-03T00:00:00.000Z"),
+        },
+      ],
+    });
+
+    const res = await listTopics(makeListRequest({ source: "onchain" }));
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body).toHaveLength(1);
+    expect(body[0].id).toBe("onchain:agent-registration");
+    expect(body[0].slug).toBe("agent-registration");
+  });
+
+  it("merges canonical + onchain topics for source=all", async () => {
+    mockDb.query.topics.findMany.mockResolvedValueOnce([
+      {
+        ...mockDbTopic,
+        slug: "agent-registration",
+        name: "Agent Registration",
+        actionCount: 5,
+        agentCount: 2,
+        velocity: 0.2,
+      },
+    ]);
+    mockDb.execute.mockResolvedValueOnce({
+      rows: [
+        {
+          topic_slug: "agent-registration",
+          topic_name: "Agent Registration",
+          velocity: 0.8,
+          action_count: 20,
+          agent_count: 7,
+          last_seen_at: new Date("2026-01-03T00:00:00.000Z"),
+        },
+      ],
+    });
+
+    const res = await listTopics(makeListRequest({ source: "all" }));
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body).toHaveLength(1);
+    expect(body[0].slug).toBe("agent-registration");
+    expect(body[0].actionCount).toBe(25);
+  });
+
   it("respects limit parameter with default of 50", async () => {
     mockDb.query.topics.findMany.mockResolvedValueOnce([]);
 
-    await listTopics(makeListRequest());
+    await listTopics(makeListRequest({ source: "moltbook" }));
 
     const call = mockDb.query.topics.findMany.mock.calls[0][0];
     expect(call.limit).toBe(50);
@@ -118,7 +174,7 @@ describe("GET /api/v1/topics", () => {
   it("respects custom limit parameter", async () => {
     mockDb.query.topics.findMany.mockResolvedValueOnce([]);
 
-    await listTopics(makeListRequest({ limit: "15" }));
+    await listTopics(makeListRequest({ source: "moltbook", limit: "15" }));
 
     const call = mockDb.query.topics.findMany.mock.calls[0][0];
     expect(call.limit).toBe(15);
@@ -127,7 +183,7 @@ describe("GET /api/v1/topics", () => {
   it("caps limit at 100", async () => {
     mockDb.query.topics.findMany.mockResolvedValueOnce([]);
 
-    await listTopics(makeListRequest({ limit: "200" }));
+    await listTopics(makeListRequest({ source: "moltbook", limit: "200" }));
 
     const call = mockDb.query.topics.findMany.mock.calls[0][0];
     expect(call.limit).toBe(100);
@@ -240,5 +296,59 @@ describe("GET /api/v1/topics/[slug]", () => {
 
     expect(res.status).toBe(500);
     expect(body.error).toBe("Internal Server Error");
+  });
+
+  it("returns onchain-only topic detail when canonical topic is missing", async () => {
+    mockDb.query.topics.findFirst.mockResolvedValueOnce(null);
+    mockDb.query.topicAliases.findFirst.mockResolvedValueOnce(null);
+
+    mockDb.execute
+      .mockResolvedValueOnce({
+        rows: [
+          {
+            topic_name: "Agent Registration",
+            action_count: 12,
+            agent_count: 4,
+            velocity: 0.5,
+            last_seen_at: new Date("2026-01-03T00:00:00.000Z"),
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        rows: [
+          {
+            chain_id: 1,
+            tx_hash: "0xtx",
+            log_index: 0,
+            block_time: new Date("2026-01-03T00:00:00.000Z"),
+            standard: "erc8004",
+            event_name: "Registered",
+            agent_keys: ["1:0xregistry:42"],
+            agent_names: ["Onchain Agent"],
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        rows: [
+          {
+            agent_key: "1:0xregistry:42",
+            agent_name: "Onchain Agent",
+            action_count: 6,
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        rows: [{ slug: "protocol-identity-layer", name: "Protocol Identity Layer", count: 5 }],
+      });
+
+    const req = makeDetailRequest("agent-registration");
+    const res = await getTopic(req, {
+      params: Promise.resolve({ slug: "agent-registration" }),
+    });
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.topic.id).toBe("onchain:agent-registration");
+    expect(body.recentActions[0].agentId).toBe("onchain:1:0xregistry:42");
   });
 });

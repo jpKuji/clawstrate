@@ -213,12 +213,18 @@ export function TopicDetail({
                     key={contributor.agentId || i}
                     className="flex items-center justify-between"
                   >
-                    <Link
-                      href={`/agents/${contributor.agentId}`}
-                      className="text-sm text-zinc-200 hover:text-zinc-100"
-                    >
-                      {contributor.agentName || "Unknown"}
-                    </Link>
+                    {contributor.agentId ? (
+                      <Link
+                        href={`/agents/${contributor.agentId}`}
+                        className="text-sm text-zinc-200 hover:text-zinc-100"
+                      >
+                        {contributor.agentName || "Unknown"}
+                      </Link>
+                    ) : (
+                      <span className="text-sm text-zinc-300">
+                        {contributor.agentName || "Unknown"}
+                      </span>
+                    )}
                     <span className="text-xs text-zinc-500">
                       {contributor.actionCount} actions
                     </span>
@@ -280,14 +286,17 @@ export function TopicDetail({
                       {item.intent}
                     </Badge>
                   )}
-                  {item.agentName && (
-                    <Link
-                      href={`/agents/${item.agentId}`}
-                      className="text-xs text-zinc-300 hover:text-zinc-100"
-                    >
-                      {item.agentName}
-                    </Link>
-                  )}
+                  {item.agentName &&
+                    (item.agentId ? (
+                      <Link
+                        href={`/agents/${item.agentId}`}
+                        className="text-xs text-zinc-300 hover:text-zinc-100"
+                      >
+                        {item.agentName}
+                      </Link>
+                    ) : (
+                      <span className="text-xs text-zinc-300">{item.agentName}</span>
+                    ))}
                   <span className="text-xs text-zinc-600 ml-auto flex items-center gap-2">
                     {item.sentiment != null && (
                       <span

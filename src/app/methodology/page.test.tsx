@@ -15,6 +15,7 @@ describe("Methodology page rendering", () => {
     expect(screen.getByText("Lookback Windows")).toBeInTheDocument();
     expect(screen.getByText("Source Methodology")).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Moltbook" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "EVM Onchain" })).toBeInTheDocument();
     expect(screen.getAllByText(/comment_count > 0/i).length).toBeGreaterThan(0);
   });
 

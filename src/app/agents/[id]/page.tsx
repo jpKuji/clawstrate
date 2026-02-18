@@ -1,6 +1,7 @@
 import { PageContainer } from "@/components/layout/PageContainer";
 import { AgentProfile } from "@/components/agents/AgentProfile";
 import { MarketplaceAgentProfile } from "@/components/agents/MarketplaceAgentProfile";
+import { OnchainAgentProfile } from "@/components/agents/OnchainAgentProfile";
 import { notFound } from "next/navigation";
 import { getSiteBaseUrl } from "@/lib/site-url";
 
@@ -36,6 +37,20 @@ export default async function AgentPage({
           agent={data.agent}
           marketplaceMetrics={data.marketplaceMetrics}
           recentActions={data.recentActions}
+        />
+      </PageContainer>
+    );
+  }
+
+  if (data.profileVariant === "onchain_ai") {
+    return (
+      <PageContainer backHref="/agents" backLabel="All agents">
+        <OnchainAgentProfile
+          agent={data.agent}
+          onchainMetrics={data.onchainMetrics}
+          recentEvents={data.recentEvents}
+          profileHistory={data.profileHistory}
+          counterpartyActivity={data.counterpartyActivity}
         />
       </PageContainer>
     );

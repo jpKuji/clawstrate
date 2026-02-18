@@ -708,6 +708,71 @@ export const onchainIngestDeadLetters = pgTable(
   ]
 );
 
+export const onchainEventTopics = pgTable(
+  "onchain_event_topics",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    chainId: integer("chain_id")
+      .references(() => onchainChains.chainId)
+      .notNull(),
+    txHash: text("tx_hash").notNull(),
+    logIndex: integer("log_index").notNull(),
+    blockTime: timestamp("block_time").notNull(),
+    standard: text("standard").notNull(),
+    eventName: text("event_name").notNull(),
+    topicSlug: text("topic_slug").notNull(),
+    topicName: text("topic_name").notNull(),
+    relevance: real("relevance").notNull().default(1),
+    origin: text("origin").notNull().default("deterministic"), // deterministic | llm
+    intent: text("intent"),
+    metadata: jsonb("metadata").$type<Record<string, unknown>>(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (t) => [
+    uniqueIndex("idx_onchain_event_topic_unique").on(
+      t.chainId,
+      t.txHash,
+      t.logIndex,
+      t.topicSlug
+    ),
+    index("idx_onchain_event_topic_slug").on(t.topicSlug),
+    index("idx_onchain_event_topic_block_time").on(t.blockTime),
+  ]
+);
+
+export const onchainEventAgents = pgTable(
+  "onchain_event_agents",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    chainId: integer("chain_id")
+      .references(() => onchainChains.chainId)
+      .notNull(),
+    txHash: text("tx_hash").notNull(),
+    logIndex: integer("log_index").notNull(),
+    blockTime: timestamp("block_time").notNull(),
+    standard: text("standard").notNull(),
+    eventName: text("event_name").notNull(),
+    agentKey: text("agent_key")
+      .references(() => erc8004Agents.agentKey)
+      .notNull(),
+    role: text("role"),
+    metadata: jsonb("metadata").$type<Record<string, unknown>>(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (t) => [
+    uniqueIndex("idx_onchain_event_agent_unique").on(
+      t.chainId,
+      t.txHash,
+      t.logIndex,
+      t.agentKey
+    ),
+    index("idx_onchain_event_agent_agent_key").on(t.agentKey),
+    index("idx_onchain_event_agent_block_time").on(t.blockTime),
+  ]
+);
+
 export const erc8004Agents = pgTable(
   "erc8004_agents",
   {
