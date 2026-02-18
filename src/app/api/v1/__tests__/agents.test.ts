@@ -115,6 +115,28 @@ describe("GET /api/v1/agents", () => {
     expect(body[0].sourceProfileType).toBe("onchain_ai");
   });
 
+  it("falls back to canonical agents when onchain query fails", async () => {
+    mockDb.query.agents.findMany.mockResolvedValueOnce([mockDbAgent]);
+    mockDb.select.mockImplementationOnce(() =>
+      chainableSelect([
+        {
+          agentId: mockDbAgent.id,
+          platformId: "moltbook",
+          platformUserId: "SecurityBot",
+          rawProfile: { actorKind: "ai" },
+        },
+      ])
+    );
+    mockDb.execute.mockRejectedValueOnce(new Error("relation onchain_event_agents does not exist"));
+
+    const res = await listAgents(makeListRequest());
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body).toHaveLength(1);
+    expect(body[0].id).toBe(mockDbAgent.id);
+  });
+
   it("supports sort parameter: influence", async () => {
     mockDb.query.agents.findMany.mockResolvedValueOnce([]);
 

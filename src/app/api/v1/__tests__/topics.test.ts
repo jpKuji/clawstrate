@@ -129,6 +129,31 @@ describe("GET /api/v1/topics", () => {
     expect(body[0].slug).toBe("agent-registration");
   });
 
+  it("falls back to canonical topics when onchain query fails", async () => {
+    mockDb.query.topics.findMany.mockResolvedValueOnce([mockDbTopic]);
+    mockDb.execute.mockRejectedValueOnce(new Error("relation onchain_event_topics does not exist"));
+
+    const res = await listTopics(makeListRequest({ source: "all" }));
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body).toHaveLength(1);
+    expect(body[0].id).toBe(mockDbTopic.id);
+  });
+
+  it("falls back to unfiltered topics when source filter query fails", async () => {
+    mockDb.query.topics.findMany
+      .mockRejectedValueOnce(new Error("column actions.platform_id does not exist"))
+      .mockResolvedValueOnce([mockDbTopic]);
+
+    const res = await listTopics(makeListRequest({ source: "moltbook" }));
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body).toHaveLength(1);
+    expect(mockDb.query.topics.findMany).toHaveBeenCalledTimes(2);
+  });
+
   it("merges canonical + onchain topics for source=all", async () => {
     mockDb.query.topics.findMany.mockResolvedValueOnce([
       {

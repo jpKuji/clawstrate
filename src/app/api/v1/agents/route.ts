@@ -35,6 +35,18 @@ interface AgentListRow {
   description?: string | null;
 }
 
+function parseCachedRows<T>(cached: T | string | null): T | null {
+  if (!cached) return null;
+  if (typeof cached !== "string") return cached;
+
+  try {
+    return JSON.parse(cached) as T;
+  } catch (error) {
+    console.warn("Ignoring malformed cache payload for agents list", error);
+    return null;
+  }
+}
+
 function asNumber(value: unknown, fallback = 0): number {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
@@ -293,8 +305,9 @@ export async function GET(req: NextRequest) {
 
   const cacheKey = `agents:${sortBy}:${order}:${limit}:${source}:${actor}:v2`;
   const cached = await cacheGet<AgentListRow[] | string>(cacheKey);
-  if (cached) {
-    return NextResponse.json(typeof cached === "string" ? JSON.parse(cached) : cached);
+  const cachedRows = parseCachedRows<AgentListRow[]>(cached);
+  if (cachedRows) {
+    return NextResponse.json(cachedRows);
   }
 
   try {
@@ -308,7 +321,12 @@ export async function GET(req: NextRequest) {
       includeCanonical
         ? fetchCanonicalAgents({ limit: canonicalFetchLimit, source, actor, sortBy, order })
         : Promise.resolve([]),
-      includeOnchain ? fetchOnchainAgents(onchainFetchLimit) : Promise.resolve([]),
+      includeOnchain
+        ? fetchOnchainAgents(onchainFetchLimit).catch((error) => {
+            console.warn("Onchain agent query failed; continuing with canonical sources only.", error);
+            return [];
+          })
+        : Promise.resolve([]),
     ]);
 
     const merged = [...canonicalRows, ...onchainRows];

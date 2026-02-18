@@ -19,6 +19,18 @@ type TopicRow = {
   lastSeenAt?: string | Date | null;
 };
 
+function parseCachedRows<T>(cached: T | string | null): T | null {
+  if (!cached) return null;
+  if (typeof cached !== "string") return cached;
+
+  try {
+    return JSON.parse(cached) as T;
+  } catch (error) {
+    console.warn("Ignoring malformed cache payload for topics list", error);
+    return null;
+  }
+}
+
 function asNumber(value: unknown, fallback = 0): number {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
@@ -66,68 +78,85 @@ async function fetchCanonicalTopics(input: {
     recent: topics.lastSeenAt,
   };
 
-  return db.query.topics.findMany({
-    where:
-      input.source === "all"
-        ? undefined
-        : sql`EXISTS (
-            SELECT 1
-            FROM ${actionTopics}
-            INNER JOIN ${actions}
-              ON ${actions.id} = ${actionTopics.actionId}
-            WHERE ${actionTopics.topicId} = ${topics.id}
-              AND ${actions.platformId} = ${input.source}
-          )`,
-    orderBy: [desc(sortMap[input.sortBy] || topics.velocity)],
-    limit: input.limit,
-  });
+  try {
+    return await db.query.topics.findMany({
+      where:
+        input.source === "all"
+          ? undefined
+          : sql`EXISTS (
+              SELECT 1
+              FROM ${actionTopics}
+              INNER JOIN ${actions}
+                ON ${actions.id} = ${actionTopics.actionId}
+              WHERE ${actionTopics.topicId} = ${topics.id}
+                AND ${actions.platformId} = ${input.source}
+            )`,
+      orderBy: [desc(sortMap[input.sortBy] || topics.velocity)],
+      limit: input.limit,
+    });
+  } catch (error) {
+    if (input.source === "all") throw error;
+    console.warn(
+      `Source-filtered topics query failed for source="${input.source}". Falling back to unfiltered topics.`,
+      error
+    );
+    return db.query.topics.findMany({
+      orderBy: [desc(sortMap[input.sortBy] || topics.velocity)],
+      limit: input.limit,
+    });
+  }
 }
 
 async function fetchOnchainTopics(limit: number): Promise<TopicRow[]> {
-  const result = await db.execute<{
-    topic_slug: string;
-    topic_name: string;
-    velocity: number;
-    action_count: number;
-    agent_count: number;
-    last_seen_at: Date;
-  }>(sql`
-    SELECT
-      oet.topic_slug,
-      MAX(oet.topic_name) AS topic_name,
-      (COUNT(*) FILTER (WHERE oet.block_time >= NOW() - INTERVAL '24 hours')::real / 24.0) AS velocity,
-      COUNT(*)::int AS action_count,
-      COUNT(DISTINCT oa.agent_key)::int AS agent_count,
-      MAX(oet.block_time) AS last_seen_at
-    FROM onchain_event_topics oet
-    LEFT JOIN onchain_event_agents oea
-      ON oea.chain_id = oet.chain_id
-      AND oea.tx_hash = oet.tx_hash
-      AND oea.log_index = oet.log_index
-    LEFT JOIN erc8004_agents oa
-      ON oa.agent_key = oea.agent_key
-    GROUP BY oet.topic_slug
-    ORDER BY MAX(oet.block_time) DESC
-    LIMIT ${Math.max(limit, 1)}
-  `);
+  try {
+    const result = await db.execute<{
+      topic_slug: string;
+      topic_name: string;
+      velocity: number;
+      action_count: number;
+      agent_count: number;
+      last_seen_at: Date;
+    }>(sql`
+      SELECT
+        oet.topic_slug,
+        MAX(oet.topic_name) AS topic_name,
+        (COUNT(*) FILTER (WHERE oet.block_time >= NOW() - INTERVAL '24 hours')::real / 24.0) AS velocity,
+        COUNT(*)::int AS action_count,
+        COUNT(DISTINCT oa.agent_key)::int AS agent_count,
+        MAX(oet.block_time) AS last_seen_at
+      FROM onchain_event_topics oet
+      LEFT JOIN onchain_event_agents oea
+        ON oea.chain_id = oet.chain_id
+        AND oea.tx_hash = oet.tx_hash
+        AND oea.log_index = oet.log_index
+      LEFT JOIN erc8004_agents oa
+        ON oa.agent_key = oea.agent_key
+      GROUP BY oet.topic_slug
+      ORDER BY MAX(oet.block_time) DESC
+      LIMIT ${Math.max(limit, 1)}
+    `);
 
-  return extractRows<{
-    topic_slug: string;
-    topic_name: string;
-    velocity: number;
-    action_count: number;
-    agent_count: number;
-    last_seen_at: Date;
-  }>(result).map((row) => ({
-    id: `onchain:${row.topic_slug}`,
-    slug: row.topic_slug,
-    name: row.topic_name || row.topic_slug,
-    velocity: asNumber(row.velocity),
-    actionCount: asNumber(row.action_count),
-    agentCount: asNumber(row.agent_count),
-    avgSentiment: null,
-    lastSeenAt: row.last_seen_at,
-  }));
+    return extractRows<{
+      topic_slug: string;
+      topic_name: string;
+      velocity: number;
+      action_count: number;
+      agent_count: number;
+      last_seen_at: Date;
+    }>(result).map((row) => ({
+      id: `onchain:${row.topic_slug}`,
+      slug: row.topic_slug,
+      name: row.topic_name || row.topic_slug,
+      velocity: asNumber(row.velocity),
+      actionCount: asNumber(row.action_count),
+      agentCount: asNumber(row.agent_count),
+      avgSentiment: null,
+      lastSeenAt: row.last_seen_at,
+    }));
+  } catch (error) {
+    console.warn("Onchain topic query failed; returning canonical topics only.", error);
+    return [];
+  }
 }
 
 export async function GET(req: NextRequest) {
@@ -138,8 +167,9 @@ export async function GET(req: NextRequest) {
 
   const cacheKey = `topics:${sortBy}:${limit}:${source}:v2`;
   const cached = await cacheGet<TopicRow[] | string>(cacheKey);
-  if (cached) {
-    return NextResponse.json(typeof cached === "string" ? JSON.parse(cached) : cached);
+  const cachedRows = parseCachedRows<TopicRow[]>(cached);
+  if (cachedRows) {
+    return NextResponse.json(cachedRows);
   }
 
   const mergedSourceFetchLimit = Math.min(limit * 3, 300);
